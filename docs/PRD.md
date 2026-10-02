@@ -5,7 +5,7 @@
 | Status | Draft for review |
 | Owner | Clint Jenkinson |
 | Date | 2 October 2026 |
-| Version | 0.1 |
+| Version | 0.2 |
 
 ## Summary
 
@@ -35,12 +35,15 @@ The system must:
 3. Restrict each application to the users and groups an administrator selects.
 4. Record who viewed or changed data and who changed permissions.
 5. Report what it could not convert, so owners can decide on manual work.
+6. Convert common Visual Basic for Applications (VBA) logic to server-side handlers, and route everything else to manual redesign with a clear explanation.
 
 ### Non-goals
 
-The first release does not:
+The system does not:
 
-- Convert VBA code automatically. The system flags it for manual review.
+- Guarantee that converted VBA behaves identically to the original. The application owner must review and approve each translated handler.
+- Run uploaded VBA code on any server.
+- Convert VBA that automates other desktop programs, calls Windows APIs, or uses the local file system. The system flags this code for manual redesign.
 - Support Access Data Projects (`.adp`) or Access web apps (SharePoint-hosted).
 - Replace the systems portal. It integrates with the portal.
 - Provide offline use.
@@ -69,7 +72,7 @@ The system must read these Access objects from an uploaded file:
 - Queries (select, action, parameter, and crosstab).
 - Forms and subforms, including layout and control types.
 - Reports, including grouping and sorting.
-- Macros and VBA modules, for inventory only.
+- Macros and VBA modules, including source code, procedure names, and the form, report, or control each procedure belongs to.
 
 After analysis, the system produces a conversion report that classifies each object as converted, partly converted, or not converted, with a reason.
 
@@ -83,6 +86,31 @@ For each analysed database, the system must generate:
 - Query views that users can run, filter, and export.
 - Reports that users can view in the browser and export to PDF.
 - Validation rules and required-field checks carried over from the source.
+- Server-side handlers for VBA logic, as described in the next section.
+
+### VBA conversion
+
+The system classifies every VBA procedure and macro, then handles each class differently. Table 2 lists the classes.
+
+**Table 2. VBA classes and handling**
+
+| Class | Examples | Handling |
+|---|---|---|
+| Standard pattern | Open form, requery, set a default, show or hide a control, run a saved query, show a message | Convert by fixed mapping to declarative rules. No AI translation. |
+| Translatable logic | Calculations, conditional validation, record updates through DAO or ADO, loops over records | Translate to a server-side handler with an AI model. Generate tests. Require owner review. |
+| Manual redesign | Automation of Excel or Outlook, Windows API calls, file system access, local printing, connections to other databases | Do not convert. Flag with the reason and a suggested alternative. |
+
+The conversion process must:
+
+1. Extract VBA source without running it.
+2. Build an inventory that links each procedure to the object that calls it.
+3. Classify each procedure and record the class in the conversion report.
+4. Convert standard patterns and translate logic.
+5. Run translated handlers in a sandbox with no network, file system, or database access beyond the application's own schema.
+6. Generate tests from sample data, and show the results to the owner.
+7. Block publication until the owner approves each translated handler or marks it as excluded.
+
+Every translated handler must show the original VBA beside the generated code in the review screen.
 
 ### Portal integration
 
@@ -95,9 +123,9 @@ The system must:
 
 ### Access control
 
-The system must enforce permissions on the server, not only in the interface. Table 2 lists the permission levels.
+The system must enforce permissions on the server, not only in the interface. Table 3 lists the permission levels.
 
-**Table 2. Permission levels**
+**Table 3. Permission levels**
 
 | Level | Applies to | Allows |
 |---|---|---|
@@ -131,9 +159,9 @@ Auditors can search and export the log. Logs are append-only.
 
 ## Functional requirements
 
-Table 3 lists the requirements, in priority order within each area. Priority P0 is required for release, P1 is required soon after, and P2 is optional.
+Table 4 lists the requirements, in priority order within each area. Priority P0 is required for release, P1 is required soon after, and P2 is optional.
 
-**Table 3. Functional requirements**
+**Table 4. Functional requirements**
 
 | ID | Requirement | Priority |
 |---|---|---|
@@ -149,12 +177,19 @@ Table 3 lists the requirements, in priority order within each area. Priority P0 
 | FR-10 | Enforce row-level rules | P1 |
 | FR-11 | Record an audit log of data and permission events | P0 |
 | FR-12 | Re-import an updated database and show a diff before applying | P2 |
-| FR-13 | Flag VBA and macros with a suggested manual approach | P1 |
+| FR-13 | Extract VBA and macro source without running it, and build a procedure inventory | P0 |
 | FR-14 | Bulk-assign permissions from a directory group | P1 |
+| FR-15 | Classify each VBA procedure as standard pattern, translatable logic, or manual redesign | P0 |
+| FR-16 | Convert standard VBA patterns to declarative rules by fixed mapping | P1 |
+| FR-17 | Translate VBA logic to server-side handlers with an AI model | P1 |
+| FR-18 | Run translated handlers in a sandbox | P1 |
+| FR-19 | Generate tests for translated handlers and show the results to the owner | P1 |
+| FR-20 | Show original VBA beside generated code, and block publication until the owner approves or excludes each handler | P1 |
+| FR-21 | Flag manual-redesign procedures with the reason and a suggested alternative | P0 |
 
 ## Non-functional requirements
 
-- **Security:** Encrypt data in transit with TLS 1.2 or later and at rest. Scan uploaded files for malware. Never run VBA from an uploaded file.
+- **Security:** Encrypt data in transit with TLS 1.2 or later and at rest. Scan uploaded files for malware. Never run VBA from an uploaded file. Run generated handlers in a sandbox with no network or file system access, and a limit on run time and memory.
 - **Performance:** Open a form with up to 1,000 records in under 2 seconds at the 95th percentile.
 - **Scale:** Support at least 200 published applications and 2,000 concurrent users.
 - **Availability:** 99.5% monthly availability during business hours.
@@ -189,14 +224,16 @@ If you do not see a tile, you do not have permission. Contact the application ow
 
 ## Success metrics
 
-Table 4 lists the measures that show whether the product meets its goals.
+Table 5 lists the measures that show whether the product meets its goals.
 
-**Table 4. Success metrics**
+**Table 5. Success metrics**
 
 | Metric | Target |
 |---|---|
 | Share of Access objects converted without manual work | 80% or more |
 | Time from upload to published application, for a typical database | Under 1 day |
+| Share of VBA procedures converted by fixed mapping or translation, measured in the pilot | To be set after the pilot |
+| Share of translated handlers that pass owner review without edits | To be set after the pilot |
 | Applications moved from file shares to the portal in the first year | 50 |
 | Unauthorised access incidents | 0 |
 | User satisfaction score for converted applications | 4 out of 5 or more |
@@ -210,13 +247,15 @@ Table 4 lists the measures that show whether the product meets its goals.
 
 ## Risks
 
-Table 5 lists the main risks and how to reduce them.
+Table 6 lists the main risks and how to reduce them.
 
-**Table 5. Risks and mitigations**
+**Table 6. Risks and mitigations**
 
 | Risk | Impact | Mitigation |
 |---|---|---|
-| Business logic in VBA is lost | Converted application behaves differently | Flag all VBA, require owner sign-off, and offer a manual rebuild path |
+| Translated VBA behaves differently from the original | Wrong data or decisions in a published application | Generate tests, show original and generated code side by side, and require owner approval before publishing |
+| Generated handler is unsafe or runs unbounded | Data leak or loss of service | Run handlers in a sandbox with no network or file system access, with limits on time and memory, and review the code |
+| VBA that cannot convert is more common than expected | Low conversion rate and owner frustration | Run a pilot on real databases before setting targets, and report the manual share per database |
 | Complex forms do not convert faithfully | Users reject the application | Show a preview before publishing, and allow layout edits |
 | Uploaded files contain malware | System compromise | Scan files, parse them in a sandbox, and never run embedded code |
 | Sensitive data is copied into a less controlled place | Privacy breach | Classify data at upload, and require explicit permission settings before publish |
@@ -229,15 +268,19 @@ Table 5 lists the main risks and how to reduce them.
 - Is a data classification policy needed before publication, and who enforces it?
 - Who owns converted applications when the original author leaves?
 - Does any source database hold personal or health information that needs a privacy review?
+- Which language do generated handlers use, and who maintains them after publication?
+- Can the organisation send VBA source to an external AI service, or must translation run in a private deployment?
+- Which two or three real databases does the pilot use?
 
 ## Release plan
 
-Table 6 lists the release phases and what each phase delivers.
+Table 7 lists the release phases and what each phase delivers.
 
-**Table 6. Release phases**
+**Table 7. Release phases**
 
 | Phase | Content |
 |---|---|
-| Phase 1 | Upload, analysis, table and CRUD generation, application-level permissions, portal tile, audit log |
-| Phase 2 | Form and report generation, object-level and row-level permissions, VBA flagging |
-| Phase 3 | Re-import with diff, bulk permission tools, usage analytics |
+| Phase 1 | Upload, analysis, table and CRUD generation, application-level permissions, portal tile, audit log, VBA extraction, inventory, and classification |
+| Phase 2 | Form and report generation, object-level and row-level permissions, VBA pilot on sample databases, fixed-mapping conversion of standard patterns |
+| Phase 3 | AI translation of VBA logic with sandbox, tests, and owner approval, based on pilot results |
+| Phase 4 | Re-import with diff, bulk permission tools, usage analytics |
