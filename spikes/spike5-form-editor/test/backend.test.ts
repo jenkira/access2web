@@ -340,14 +340,22 @@ test("a lock that has lapsed can be taken by another designer, and the lapsed de
   assert.ok(live.version === 1 && live.entities[0].fields.some((f: any) => f.name === "email"), "no rename reached the application");
 });
 
-test("the page keeps the lock while it is open", async () => {
+test("the page keeps the lock while it is open, and the heartbeat keeps a field rename in the draft", async () => {
   const slug = await newApp();
   const page = await open(editor(slug, "dana", "CustomerForm", "&heartbeat=300"));
   await page.waitForSelector("form");
+  await page.selectOption("#rn-field", "email"); await page.fill("#rn-to", "mail");
+  await page.click('[data-fk="rn-preview"]'); await page.click('[data-fk="rn-apply"]');
+  await page.waitForFunction(() => { const s = (window as any).__spike5.saver; return s.state === "saved" && !s.dirty; });
+  const lease = () => db.query("select expires_at > now() + interval '10 minutes' as long from a2w_control.drafts where app_id = (select id from a2w_control.applications where slug = $1)", [slug]);
   await db.query("update a2w_control.drafts set expires_at = now() + interval '5 seconds' where app_id = (select id from a2w_control.applications where slug = $1)", [slug]);
+  assert.equal((await lease()).rows[0].long, false, "the lease was short before the heartbeats");
   await page.waitForTimeout(1200);  // several heartbeats, with no edit
-  const r = await db.query("select expires_at > now() + interval '10 minutes' as long from a2w_control.drafts where app_id = (select id from a2w_control.applications where slug = $1)", [slug]);
-  assert.equal(r.rows[0].long, true);
+  assert.equal((await lease()).rows[0].long, true, "a heartbeat extended it");
+  assert.deepEqual((await draftOf(slug, "dana")).draft.log.map((o: any) => [o.t, o.from, o.to]), [["renameField", "email", "mail"]], "and sent the draft as it is, with the rename");
+  const dan = await api("POST", `/api/apps/${slug}/draft/lock`, who("dan"));
+  assert.equal(dan.status, 409); assert.equal(dan.body.locked_by, "dana", "so nobody else can take it");
+  await page.waitForFunction(() => (window as any).__spike5.saver.state === "saved");  // the heartbeat does not leave the page in an error state
 });
 
 test("publishing ends the draft, and the page starts the next one from the new version", async () => {
