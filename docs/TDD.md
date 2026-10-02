@@ -16,18 +16,18 @@ The design rests on one decision: the system does not generate and deploy source
 
 ## Status of decisions
 
-The PRD leaves several choices open. This document proposes an answer for each one so that design can proceed. Table 1 lists them. The owner must confirm or change each before build starts.
+The PRD leaves several choices open. This document proposes an answer for each one so that design can proceed. Table 1 lists them. Decisions the owner has accepted are recorded in the [decisions log](DECISIONS.md), which takes precedence over this table.
 
 **Table 1. Proposed decisions**
 
 | Decision | Proposal | Reason | Status |
 |---|---|---|---|
-| Database engine | PostgreSQL 16 | Row-level security, schemas, and generated columns match the access-control model | Proposed |
-| Sign-in standard | OpenID Connect (OIDC) | Widely supported by portals and directory services | Proposed, depends on the portal |
-| Handler language | TypeScript, run in a WebAssembly (Wasm) sandbox | One language across the stack, and a strong isolation boundary | Proposed |
+| Database engine | PostgreSQL 16 | Row-level security, schemas, and generated columns match the access-control model | Accepted (D3) |
+| Sign-in standard | OpenID Connect (OIDC) | Widely supported by portals and directory services | Provisional (D10), depends on the portal |
+| Handler language | TypeScript, run in a WebAssembly (Wasm) sandbox | One language across the stack, and a strong isolation boundary | Accepted (D4) |
 | Table, data, and query extraction | Jackcess (Java) on Linux, cross-checked with mdbtools and a Python reader | Open source, reads `.mdb` and `.accdb`, and needs no Access licence | Proposed, needs spike 1 |
-| Form, report, macro, and VBA extraction | Windows Server worker that drives Microsoft Access with PowerShell | No open source tool found that reads form and report definitions. The owner has run this kind of automation on server operating systems. | Proposed, needs spike 1 |
-| AI service for translation | Provider interface, with a private deployment option | The organisation might not allow VBA source to leave its network | Open |
+| Form, report, macro, and VBA extraction | Windows Server worker that drives Microsoft Access with PowerShell | No open source tool found that reads form and report definitions. The owner has run this kind of automation on server operating systems. | Accepted risk (D1, D2). Spike 1 measures stability. |
+| AI model for translation | A private model hosted by the organisation, behind a provider interface | VBA source can contain credentials and business rules, so it stays inside the network | Accepted (D9). Spike 4 tests it. |
 | Hosting | Containers on the organisation's platform, with a small Windows worker pool | Matches existing operations | Proposed |
 
 ## Goals and constraints
@@ -287,7 +287,24 @@ The sandbox runs handlers in a Wasm JavaScript engine, such as QuickJS compiled 
 
 ### Translation service
 
-The translation service is an interface with two implementations: a hosted AI service, and a private deployment. Which one is allowed is an open question, because VBA source can contain credentials and business rules. The pipeline must therefore strip string literals that match credential patterns before it sends source out, and must log every request.
+The translation service is an interface with a private, locally hosted model as the first implementation. A hosted AI service stays possible as a second implementation only if the data policy owner approves it. Decision D9 in the [decisions log](DECISIONS.md) records this choice. The pipeline must strip string literals that match credential patterns before it sends source to any model, and must log every request.
+
+#### Local model approach
+
+A survey of 2026 sources suggests that a local model is feasible, but the quality varies with size. The sources are blog posts and research papers, and the design has not verified their figures. The points that shape the design are:
+
+- Open-weight code models in the 14 billion to 30 billion parameter range are the practical target. One study found that 7 billion parameter models failed to produce compilable output for API-aware translation, while a 14 billion parameter model reached a compile rate of about 46%. The study did not translate VBA, so the figure is only an indication.
+- Candidates include the Qwen3-Coder family, which is released under the Apache 2.0 licence. A 30 billion parameter mixture-of-experts version has only 3 billion active parameters, and an 80 billion parameter version (Qwen3-Coder-Next) needs about 46 GB of memory, according to the sources. The team must confirm the licence and availability of any model at the start of Spike 4.
+- At 4-bit quantisation, a model needs about half a byte of memory for each parameter, plus 4 to 8 GB for the attention cache at a 32,000-token context. A 32 billion parameter model therefore needs about 20 GB, so a single 24 GB GPU suits models up to about 30 billion parameters with a short context.
+- vLLM suits production serving with several concurrent requests. Ollama and llama.cpp are simpler and suit the spike. Translation is a batch task with a human reviewer, so throughput and response time matter less than accuracy.
+- Studies report that supplying the domain model (entities and fields) and similar worked examples improves results. The request format in stage 4 already includes the entity and field definitions, and the pipeline adds retrieved examples of approved translations.
+
+The pipeline compensates for a weaker model in these ways:
+
+1. Fixed mappings handle standard patterns, so the model never sees them.
+2. A bounded repair loop returns parse errors and failed tests to the model, with a limit of three attempts.
+3. The classifier sends any procedure that uses automation of other programs, Windows API calls, or the file system to manual redesign, so the model does not invent a translation.
+4. The owner reviews every handler, so a wrong translation does not publish without a person approving it.
 
 ## Authorisation
 
@@ -325,7 +342,7 @@ The token carries identity only. The authorisation service resolves groups and g
 
 ### Default deny
 
-A published application has no grants until the owner adds them. The publish screen shows a summary of who can open the application and requires the owner to confirm it.
+A published application has no grants until the owner adds them. The publish screen shows a summary of who can open the application and requires the owner to confirm it. The owner must also confirm the data classification that the system recorded at upload. Publishing is blocked until the owner does both.
 
 ## Portal integration
 
@@ -429,7 +446,7 @@ The test plan has these parts:
 
 ## Delivery plan
 
-Work follows the phases in the PRD. Three spikes come first, because they test the assumptions that carry the most risk. Table 9 lists them.
+Work follows the phases in the PRD. Four spikes come first, because they test the assumptions that carry the most risk. The [spike plan](SPIKE-PLAN.md) gives the method for each. Table 9 lists them.
 
 **Table 9. Spikes**
 
@@ -438,23 +455,26 @@ Work follows the phases in the PRD. Three spikes come first, because they test t
 | 1. Extraction | Can native parsing and Access automation together extract tables, forms, reports, macros, and VBA from real files? | At least 90% of objects in 3 real databases extract without errors |
 | 2. Query translation | Can a Jet SQL transpiler convert the organisation's queries? | At least 80% of queries in the same databases convert and return matching results |
 | 3. Handler sandbox | Can a Wasm sandbox run realistic handlers within limits? | Hostile handlers fail safely, and normal handlers run within 100 ms |
+| 4. Local model | Can a locally hosted model translate VBA to approvable handlers? | At least 50% of translatable procedures pass their tests unedited, and no manual-redesign procedure receives a translation |
 
-The thresholds in Table 9 are proposals. The owner must set them.
+The owner adopted the thresholds in Table 9 (decision D5) and can revise them before the spikes start.
 
 ## Open questions
 
+The [decisions log](DECISIONS.md) holds the open items, their owners, and the point at which each needs an answer. The items that most affect this design are:
+
 - Which portal does the organisation use, and what registration and identity options does it offer?
-- Does the organisation's Microsoft licensing cover running Access on a Windows Server worker pool, and does the security owner accept use that Microsoft does not support?
-- Can the VBA extraction method for `.accdb` files, which avoids Access, be made reliable?
-- Does the organisation need explicit deny grants?
 - Where must data live, and does any application hold data that needs a privacy review?
-- Which translation service is allowed, and does the data policy permit it?
+- Is a GPU server available for the local model, and what is the hosting budget?
 - Who maintains handlers after publication, and how does an owner change one?
 - How does a re-import (FR-12) merge changes with an owner's edits to the definition?
+- Can the VBA extraction method for `.accdb` files, which avoids Access, be made reliable?
+- Does the organisation's licensing cover Access on a Windows Server worker pool?
 
 ## Risks
 
 - The automation tier might not meet cost, licence, or security requirements, and Microsoft does not support unattended Automation of Office. Access can hang, so the design assumes failures and limits each job. Spike 1 tests this first.
 - The runtime must support every control and rule type. A gap shows up as a conversion failure for owners, so the conversion corpus must cover the controls in use.
 - Jet SQL has many edge cases. Query translation could take longer than planned, and the fallback is to mark queries as not converted.
+- A local model might translate too few procedures well enough to be useful. Spike 4 measures this before the pipeline is built, and the fallback is to rely on fixed mappings, flag more procedures for manual redesign, or ask the data policy owner to approve a hosted service.
 - Owner review of handlers is a human bottleneck. If owners approve without reading, the safeguards fail, so the review screen must show test results and the original code, and the audit log must record every approval.

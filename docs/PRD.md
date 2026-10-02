@@ -186,6 +186,7 @@ Table 4 lists the requirements, in priority order within each area. Priority P0 
 | FR-19 | Generate tests for translated handlers and show the results to the owner | P1 |
 | FR-20 | Show original VBA beside generated code, and block publication until the owner approves or excludes each handler | P1 |
 | FR-21 | Flag manual-redesign procedures with the reason and a suggested alternative | P0 |
+| FR-22 | Classify the data in each application at upload, and block publishing until the owner confirms the classification | P1 |
 
 ## Non-functional requirements
 
@@ -242,7 +243,7 @@ Table 5 lists the measures that show whether the product meets its goals.
 
 - The systems portal exposes an API or integration point for registering applications and reading user identity.
 - A directory service, such as Microsoft Entra ID or LDAP, provides users and groups.
-- The organisation approves a target database engine, such as PostgreSQL.
+- PostgreSQL is the target database engine (decision D3 in the [decisions log](DECISIONS.md)).
 - Source Access files are not password-protected, or the owner supplies the password at upload.
 
 ## Risks
@@ -263,14 +264,17 @@ Table 6 lists the main risks and how to reduce them.
 
 ## Open questions
 
-- Which portal and which SSO standard (SAML or OpenID Connect) does the organisation use?
-- Which database engine does the platform team approve?
-- Is a data classification policy needed before publication, and who enforces it?
-- Who owns converted applications when the original author leaves?
-- Does any source database hold personal or health information that needs a privacy review?
-- Which language do generated handlers use, and who maintains them after publication?
-- Can the organisation send VBA source to an external AI service, or must translation run in a private deployment?
-- Which two or three real databases does the pilot use?
+The [decisions log](DECISIONS.md) records decisions and open items. The items that need an answer are:
+
+- Which portal and sign-in standard does the organisation use?
+- Where must data live, and does any source database hold personal or health information that needs a privacy review?
+- Who maintains handlers after publication, and who owns an application when its author leaves?
+- Which three to five real databases do the pilot and the spikes use?
+- Is a GPU server available to host the translation model, and what is the budget?
+- When the web version goes live, do users stop using the `.accdb` file, and how does the system prevent two diverging copies of the data?
+- How does the system handle tables linked to SQL Server or other ODBC sources, and tables linked from a back-end file in a split database?
+- Who writes row-level rules for each application, and how?
+- How long does the system keep uploaded files, audit logs, and exports?
 
 ## Release plan
 

@@ -6,27 +6,27 @@
 | Owner | Clint Jenkinson |
 | Date | 2 October 2026 |
 | Version | 0.1 |
-| Related | [Technical design document](TDD.md), Table 9 |
+| Related | [Technical design document](TDD.md), Table 9, and the [decisions log](DECISIONS.md) |
 
 ## Summary
 
-Three spikes test the assumptions that carry the most risk in the design. Each spike answers one question with a pass or fail result and a written report. The results decide whether the project continues as designed, changes scope, or stops.
+Four spikes test the assumptions that carry the most risk in the design. Each spike answers one question with a pass or fail result and a written report. The results decide whether the project continues as designed, changes scope, or stops.
 
-Spike 1 comes first because it can remove form, report, and VBA conversion from scope. Spikes 2 and 3 can run in parallel after Spike 1 delivers its first extraction results.
+Spike 1 comes first because it can remove form, report, and VBA conversion from scope. Spikes 2 and 3 can run in parallel after Spike 1 delivers its first extraction results. Spike 4 depends on the hand-translated handlers from Spike 3.
 
 ## Ground rules
 
-These rules apply to all three spikes:
+These rules apply to all four spikes:
 
 - Spikes produce knowledge, not product code. Prototype code lives in a `spikes/` directory and is not reused without review.
 - Each spike has a time box. If a spike reaches its limit without a result, it reports what it learned and stops.
 - Each spike writes a report that states the question, method, measurements, result, and recommendation.
 - Source databases are copies. The team stores them in a restricted location and deletes them when the spikes end.
-- The team does not send VBA source or data to an external AI service until the organisation approves it.
+- The team does not send VBA source or data to a hosted AI service (decision D8). Spike 4 uses a local model.
 
 ## Sample databases
 
-All three spikes use the same set of real databases. The application owner nominates three to five. Together, they must cover these cases:
+All four spikes use the same set of real databases. The application owner nominates three to five. Together, they must cover these cases:
 
 - One small, simple database, as a baseline.
 - One database with many forms and heavy VBA.
@@ -242,9 +242,9 @@ Table 4 lists the measures and the pass conditions.
 | Transaction rollback | A failed handler leaves no partial change |
 | Host interface coverage | All 10 handlers run with the interface as designed, or the report lists the missing functions |
 
-### Optional: early translation signal
+### Translation signal
 
-If the organisation approves an AI service for the spike, or a private deployment is available, translate the same 10 procedures with the model. Record how many need edits and what kind. This result is an early signal only. The Phase 2 pilot measures translation quality properly.
+This spike does not test AI translation. Spike 4 tests it with a local model and reuses the 10 hand-translated handlers from this spike as reference answers.
 
 ### Outputs
 
@@ -258,19 +258,75 @@ If the organisation approves an AI service for the spike, or a private deploymen
 - If a hostile handler escapes, stop and change the isolation approach before any other work on handlers.
 - If speed fails, test a warm instance pool, and review the clean-instance rule in the technical design.
 
+## Spike 4: local translation model
+
+### Question
+
+Can a locally hosted model translate VBA procedures to TypeScript handlers that the owner can approve with little editing, and can it avoid translating procedures that must go to manual redesign?
+
+### Time box
+
+An estimate of 5 working days for one engineer, after Spike 3 delivers its hand-translated handlers. The spike also needs a GPU server (open item O5).
+
+### Method
+
+To evaluate the model:
+
+1. Build an evaluation set of 30 or more VBA procedures from the sample databases. Include the 10 procedures from Spike 3, which have hand-written reference handlers. Include at least 10 procedures that belong in manual redesign, such as automation of Excel or Outlook, Windows API calls, and file access.
+2. Choose two or three candidate models. Cover a mid-size class of about 14 billion parameters, a class of about 30 billion parameters, and a larger class if the hardware allows it. Candidates include models in the Qwen3-Coder family. Confirm the licence and availability of each model on the first day.
+3. Serve the models locally with Ollama or llama.cpp. Record the hardware, quantisation level, and context length.
+4. Build the translation prompt from the technical design: the procedure, the entity and field definitions, and the handler interface.
+5. Run each model on the full set. Parse each result, and reject any output that uses anything outside the handler interface.
+6. Add the bounded repair loop with up to three attempts. Return the parse errors and failed tests to the model.
+7. Add retrieved examples of approved translations to the prompt, and run the set again. Record whether examples change the result.
+8. Run the generated handlers in the Spike 3 sandbox against tests, and compare the outputs with the reference handlers.
+9. Ask the application owner to rate a sample of 15 results as approvable as is, approvable with minor edits, or not approvable.
+10. Record the time and memory use for each model.
+
+### Measures
+
+Table 5 lists the measures and the pass conditions.
+
+**Table 5. Spike 4 measures**
+
+| Measure | Pass condition |
+|---|---|
+| Output parses and uses only the handler interface, after up to 3 repair attempts | 95% or more |
+| Translatable procedures that pass their tests without edits | 50% or more |
+| Translatable procedures rated approvable with minor edits or better | 75% or more |
+| Manual-redesign procedures that receive a translation | 5% or fewer |
+| Time to translate one procedure | Under 5 minutes, as a proposal for the owner to confirm |
+
+The 5% limit on manual-redesign procedures is strict because a confident but wrong translation of code that automates Outlook, for example, is a hazard that the owner might approve without noticing.
+
+### Outputs
+
+- Report comparing the models on each measure, with hardware and cost.
+- Effect of the repair loop and of examples.
+- Failure categories, with samples.
+- Recommendation on the model, the serving software, and the hardware for production.
+
+### Decision
+
+- If the measures pass, choose the model and size the hardware.
+- If the model passes on translatable procedures but translates manual-redesign procedures, strengthen the classifier and test again before any build.
+- If no model passes, rely on fixed mappings and manual redesign, and ask the data policy owner whether a hosted service can be used for a defined class of procedure.
+
 ## Schedule and dependencies
 
-Table 5 shows the order of work. The durations are estimates, and the owner must confirm them against available people.
+Table 6 shows the order of work. The durations are estimates, and the owner must confirm them against available people.
 
-**Table 5. Schedule**
+**Table 6. Schedule**
 
-| Week | Spike 1 | Spike 2 | Spike 3 |
-|---|---|---|---|
-| Before week 1 | Nominate databases, confirm Access licence and a Windows test machine | | |
-| 1 | Parts 1a and 1b | | Harness and 10 handlers |
-| 2 | Parts 1c and 1d, and report | Collect queries, build the prototype | Hostile suite and report |
-| 3 | | Compare results and report | |
-| End of week 3 | Decision meeting on all three results | | |
+| Week | Spike 1 | Spike 2 | Spike 3 | Spike 4 |
+|---|---|---|---|---|
+| Before week 1 | Nominate databases, confirm Access licence and a Windows test machine | | | Arrange a GPU server |
+| 1 | Parts 1a and 1b | | Harness and 10 handlers | |
+| 2 | Parts 1c and 1d, and report | Collect queries, build the prototype | Hostile suite and report | Prepare the evaluation set |
+| 3 | | Compare results and report | | Run models |
+| 4 | | | | Owner rating and report |
+| End of week 3 | Decision meeting on Spikes 1 to 3 | | | |
+| End of week 4 | | | | Decision meeting on Spike 4 |
 
 ## Prerequisites
 
@@ -279,7 +335,7 @@ The spikes cannot start until these items exist:
 - Three to five sample databases, nominated by the application owner and copied to a restricted location.
 - The owner's existing PowerShell automation scripts for Access.
 - A Windows Server machine or VM with a licensed copy of Microsoft Access.
-- A decision on whether any AI service is allowed for the optional step.
+- A GPU server for Spike 4, or a decision on how to obtain one.
 - Someone to confirm the licence and support position for Access on a server or in a container.
 
 ## Risks
