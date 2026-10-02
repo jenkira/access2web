@@ -93,7 +93,7 @@ The design proposes a disposable VM for each job. This part compares that choice
 
 For each configuration, check these points:
 
-- Whether Microsoft Access installs and runs. Microsoft does not support unattended Automation of Office, and states that the practice might not be covered by the licence agreement. The owner's experience shows that it works on server operating systems, but the organisation must still confirm the licence terms and accept the lack of support before relying on any result.
+- Whether Microsoft Access installs and runs. Microsoft does not support unattended Automation of Office, and the organisation accepted that risk (decision D2). The owner's experience shows that it works on server operating systems. The organisation also confirmed that its licensing covers this use (decision D21).
 - Whether the job can run without a signed-in desktop session.
 - Start-up time for each job, and time to destroy the environment.
 - Memory and CPU use for each job.
@@ -117,7 +117,7 @@ Table 1 lists the measures and the pass conditions.
 | Macros disabled during extraction | No marker file in any run |
 | Native VBA extraction (Part 1c) | Recovered source matches the `SaveAsText` export for every sample, or a documented reason |
 | Unattended stability over 200 consecutive jobs | 99% or more complete without a hang or crash, and every failure is recovered by the time limit |
-| Isolation configuration | At least one configuration passes all isolation checks, with licence and support confirmed |
+| Isolation configuration | At least one configuration passes all isolation checks, with licensing confirmed (D21) and the support risk accepted (D2) |
 | Job start-up time | Under 60 seconds, as a proposal for the owner to confirm |
 
 ### Outputs
@@ -381,7 +381,7 @@ Table 7 shows the order of work. The durations are estimates, and the owner must
 
 | Week | Spike 1 | Spike 2 | Spike 3 | Spike 4 | Spike 5 |
 |---|---|---|---|---|---|
-| Before week 1 | Nominate databases, confirm Access licence and a Windows test machine | | | Arrange a high-memory CPU node | Arrange three test users |
+| Before week 1 | Nominate databases and a Windows test machine | | | Arrange a high-memory CPU node | Arrange three test users |
 | 1 | Parts 1a and 1b | | Harness and 10 handlers | | |
 | 2 | Parts 1c and 1d, and report | Collect queries, build the prototype | Hostile suite and report | Prepare the evaluation set | Renderer prototype |
 | 3 | | Compare results and report | | Run models | Editor, operation log, rename, and drafts |
@@ -398,11 +398,9 @@ The spikes cannot start until these items exist:
 - A Windows Server 2022 machine or VM with a licensed copy of Microsoft Access, to match the cluster's Windows nodes. Confirm that the Access edition installs and runs on Windows Server 2022.
 - A high-memory CPU node for Spike 4, which the platform team provisions (decision D20). The proposed specification is 16 or more cores and 64 GB of memory.
 - Three representative users for the Spike 5 usability session, with half a day each.
-- Someone to confirm the licence and support position for Access on a server or in a container.
 
 ## Risks
 
 - The sample databases might not represent the organisation's range. A skewed sample gives results that look better or worse than reality, so the owner must choose files that include the difficult cases.
 - Pass thresholds are proposals. If the owner does not confirm them before the spikes start, the results can be argued either way.
-- Licence terms might rule out the automation tier regardless of the technical result. Check this in the first days, before the team invests in the rest of Part 1.
 - Microsoft does not support unattended Automation of Office. The automation tier can work in tests and still fail under production load, so the stability test must run long enough to show hangs.

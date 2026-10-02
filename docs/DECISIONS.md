@@ -40,6 +40,7 @@ Table 1 lists each decision, its status, and its source.
 | D18 | Host the translation model on high-memory CPU nodes in the cluster, using a mixture-of-experts model, and use an external GPU server only if Spike 4 shows it is needed | Accepted | Accepted on 2 October 2026. Follows from the lack of GPU nodes. |
 | D19 | Storage for PostgreSQL volumes is NVMe SAN presented through the VMware Kubernetes connector. The cluster encrypts Kubernetes Secrets at rest. Windows nodes run Windows Server 2022 and can pull images from the internet. | Accepted | Confirmed by the platform team on 2 October 2026. |
 | D20 | The platform team provisions a high-memory CPU node to specification for the translation model | Accepted | Confirmed by the platform team on 2 October 2026. Proposed starting specification: 16 or more cores and 64 GB of memory. Spike 4 confirms or revises it. |
+| D21 | Microsoft licensing covers running Access on a Windows Server worker | Accepted | Confirmed by the owner on 2 October 2026. |
 
 ## Open items
 
@@ -51,7 +52,6 @@ Table 2 lists the items that still need an answer, who can answer them, and when
 |---|---|---|---|
 | O1 | Which portal does the organisation use, and what registration and identity options does it offer? | Platform team | Design is final |
 | O2 | Which three to five databases do the spikes use? Include a heavy-VBA file, a complex-query file, a split database, and both file formats. | Application owner | Spikes start |
-| O3 | Does the organisation's Microsoft licensing cover Access on a Windows Server worker? The owner accepted the support risk, but the licence terms are a separate matter. | Licensing contact | Spikes start |
 | O4 | Where must data live, and does any application hold personal or health information that needs a privacy review? | Privacy officer | Design is final |
 | O6 | Who maintains handlers after publication, and who owns an application when its author leaves? | Application owner | Build starts |
 | O7 | How does a re-import (FR-12) merge changes with an owner's edits to the definition? Decision D12 removes the need to merge for edited applications, so this item applies only to unedited ones. | Design team | FR-12 is built (P2) |

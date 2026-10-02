@@ -27,7 +27,7 @@ Read these documents in this order:
 
 Do not reopen these decisions. If a spike finds evidence against one, report it and keep going.
 
-- Access is automated on a Windows Server worker with PowerShell, and the owner accepted the support risk (D1, D2).
+- Access is automated on a Windows Server worker with PowerShell. The owner accepted the support risk, and licensing is confirmed (D1, D2, D21).
 - The application database is PostgreSQL, and handlers are TypeScript in a WebAssembly sandbox (D3, D4).
 - The spike pass thresholds in the spike plan stand (D5).
 - No VBA source or data goes to a hosted AI service (D8). Spike 4 uses a local model on CPU (D9, D18).
@@ -58,7 +58,6 @@ You cannot start until these items exist. Items marked blocking stop all work if
 | Item | Blocking for | Provided by |
 |---|---|---|
 | Three to five sample databases (open item O2) | All spikes | Application owner |
-| Confirmation that licensing covers Access on a worker (open item O3) | Spike 1 | Licensing contact |
 | Windows Server 2022 machine or VM with licensed Access. Confirm that the Access edition runs on Server 2022. | Spike 1 | Platform team |
 | The owner's existing PowerShell automation scripts | Spike 1 | Application owner |
 | Access to the RKE2 cluster, with a namespace for the spikes and Windows node access | Spikes 1, 3, 4 | Platform team |
@@ -85,7 +84,6 @@ Stop work and tell the owner the same day if any of these happen:
 
 - A hostile handler escapes the sandbox in Spike 3.
 - A macro or VBA procedure runs during extraction in Spike 1.
-- The licensing contact states that Access cannot run on a worker.
 - A sample database holds data that the owner did not expect, such as personal or health information.
 - Any spike cannot meet its pass condition, and you cannot find a cause within a day.
 

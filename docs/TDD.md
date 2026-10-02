@@ -190,7 +190,7 @@ The VBA position is less clear. Public write-ups describe compressed VBA streams
 The owner has automated Access with PowerShell on server operating systems, and the worker builds on that experience. Two constraints remain:
 
 - Microsoft does not support unattended Automation of Office applications, and states that Office can be unstable or deadlock in that setting. The Access Runtime and the Database Engine Redistributable count as Office components. See [Considerations for server-side Automation of Office](https://support.microsoft.com/help/257757).
-- Microsoft states that using server-side Automation to provide Office functionality to unlicensed workstations is not covered by the end user licence agreement. The organisation must confirm that its licensing covers this use.
+- Microsoft states that using server-side Automation to provide Office functionality to unlicensed workstations is not covered by the end user licence agreement. The organisation confirmed that its licensing covers this use (decision D21).
 
 The worker design must therefore assume that Access can hang or crash. It must apply a time limit to each job, kill the process on timeout, and restart the environment between jobs. Spike 1 measures how often failures occur.
 
@@ -632,7 +632,6 @@ The [decisions log](DECISIONS.md) holds the open items, their owners, and the po
 - Who maintains handlers after publication, and how does an owner change one?
 - How does a re-import (FR-12) merge changes with an owner's edits to the definition?
 - Can the VBA extraction method for `.accdb` files, which avoids Access, be made reliable?
-- Does the organisation's licensing cover Access on a Windows Server worker pool?
 - Which PostgreSQL operator or backup method does the platform team prefer?
 
 ## Risks
@@ -640,7 +639,7 @@ The [decisions log](DECISIONS.md) holds the open items, their owners, and the po
 - The cluster has no GPU nodes, so the model runs on CPU. If CPU speed or quality is too low, the model needs an external GPU server, which adds cost and a component to operate. The queue and provider interfaces keep that change small.
 - PostgreSQL runs in the cluster, so the platform team owns its availability, backups, and upgrades. A failure here affects every application and the audit store, so the operator choice and the restore test are critical.
 - Secrets reach pods through a refresh interval in the External Secrets Operator. A Passwordstate outage or a failed sync leaves pods with the last synced value, and a rotated credential reaches pods only after the next sync. Per-application database credentials must tolerate this delay.
-- The automation tier might not meet cost, licence, or security requirements, and Microsoft does not support unattended Automation of Office. Access can hang, so the design assumes failures and limits each job. Spike 1 tests this first.
+- The automation tier might not meet cost or security requirements, and Microsoft does not support unattended Automation of Office. The organisation confirmed the licensing (decision D21) and accepted the support risk (decision D2). Access can hang, so the design assumes failures and limits each job. Spike 1 tests this first.
 - The runtime must support every control and rule type. A gap shows up as a conversion failure for owners, so the conversion corpus must cover the controls in use.
 - Jet SQL has many edge cases. Query translation could take longer than planned, and the fallback is to mark queries as not converted.
 - A local model might translate too few procedures well enough to be useful. Spike 4 measures this before the pipeline is built, and the fallback is to rely on fixed mappings, flag more procedures for manual redesign, or ask the data policy owner to approve a hosted service.
