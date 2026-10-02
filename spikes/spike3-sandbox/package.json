@@ -1,0 +1,18 @@
+{
+  "name": "spike3-sandbox",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "Spike 3 prototype: handler sandbox. Not product code.",
+  "scripts": {
+    "test": "node --test test/",
+    "normal": "node src/run-normal.mjs",
+    "hostile": "node src/run-hostile.mjs"
+  },
+  "dependencies": {
+    "isolated-vm": "^6.0.0",
+    "pg": "^8.12.0",
+    "quickjs-emscripten": "^0.31.0",
+    "typescript": "^5.6.0"
+  }
+}
