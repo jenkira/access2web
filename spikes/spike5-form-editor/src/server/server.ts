@@ -6,8 +6,8 @@ import { extname, join, normalize } from "node:path";
 import { History } from "../model/history.ts";
 import type { Op } from "../model/ops.ts";
 import { OpError, validateDefinition } from "../model/validate.ts";
-import { canonical, type Definition, allControls } from "../model/types.ts";
-import { failedRules, type Rec } from "../ui/render.ts";
+import { canonical, type Definition } from "../model/types.ts";
+import { failedRules, unknownFields, type Rec } from "../ui/render.ts";
 import { can, type Grants } from "./permissions.ts";
 
 interface Draft { baseVersion: number; lockedBy: string; log: Op[] }
@@ -61,7 +61,7 @@ export function createServer(opts: { base: Definition; grants: Grants; staticDir
       if (body.version !== current().version) return send(res, 409, { error: "version_changed", current: current().version });
       const form = current().forms.find((f) => f.name === body.form);
       if (!form) return send(res, 404, { error: "unknown form" });
-      const unknown = Object.keys(body.record ?? {}).filter((k) => !allControls(form).some((c) => "bind" in c && c.bind === k));
+      const unknown = unknownFields(form, body.record ?? {});
       if (unknown.length) return send(res, 422, { error: "unknown fields", fields: unknown });
       const errors = failedRules(current(), form, body.record as Rec);
       if (errors.length) return send(res, 422, { error: "validation", errors });

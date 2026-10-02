@@ -1,0 +1,849 @@
+{
+ "description": "Conformance vectors for server-side form rules. Given a form and a record, both the TypeScript and the Python checker must report these errors, in this order, and these unknown fields. The definition is the demo application from the form editor prototype.",
+ "now": "2026-03-01T09:30:00Z",
+ "definition": {
+  "app": "demo",
+  "version": 1,
+  "entities": [
+   {
+    "name": "Customer",
+    "table": "customers",
+    "fields": [
+     {
+      "name": "customerid",
+      "type": "number",
+      "key": true,
+      "required": true
+     },
+     {
+      "name": "name",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "city",
+      "type": "text"
+     },
+     {
+      "name": "credit_limit",
+      "type": "number"
+     },
+     {
+      "name": "active",
+      "type": "bool"
+     },
+     {
+      "name": "joined",
+      "type": "date"
+     }
+    ]
+   },
+   {
+    "name": "Product",
+    "table": "products",
+    "fields": [
+     {
+      "name": "productid",
+      "type": "number",
+      "key": true,
+      "required": true
+     },
+     {
+      "name": "name",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "category",
+      "type": "text"
+     },
+     {
+      "name": "unit_price",
+      "type": "number",
+      "required": true
+     },
+     {
+      "name": "discontinued",
+      "type": "bool"
+     }
+    ]
+   },
+   {
+    "name": "Order",
+    "table": "orders",
+    "fields": [
+     {
+      "name": "orderid",
+      "type": "number",
+      "key": true,
+      "required": true
+     },
+     {
+      "name": "customer_id",
+      "type": "number",
+      "required": true
+     },
+     {
+      "name": "status",
+      "type": "text",
+      "required": true
+     },
+     {
+      "name": "order_date",
+      "type": "date",
+      "required": true
+     },
+     {
+      "name": "ship_date",
+      "type": "date"
+     },
+     {
+      "name": "freight",
+      "type": "number"
+     },
+     {
+      "name": "notes",
+      "type": "text"
+     }
+    ]
+   },
+   {
+    "name": "OrderLine",
+    "table": "orderlines",
+    "fields": [
+     {
+      "name": "lineid",
+      "type": "number",
+      "key": true,
+      "required": true
+     },
+     {
+      "name": "order_id",
+      "type": "number",
+      "required": true
+     },
+     {
+      "name": "product_id",
+      "type": "number",
+      "required": true
+     },
+     {
+      "name": "qty",
+      "type": "number",
+      "required": true
+     },
+     {
+      "name": "discount",
+      "type": "number"
+     }
+    ]
+   }
+  ],
+  "forms": [
+   {
+    "name": "CustomerForm",
+    "title": "Customer",
+    "entity": "Customer",
+    "rows": [
+     {
+      "id": "r1",
+      "controls": [
+       {
+        "id": "c_name",
+        "type": "text",
+        "bind": "name",
+        "label": "Name"
+       }
+      ]
+     },
+     {
+      "id": "r2",
+      "controls": [
+       {
+        "id": "c_city",
+        "type": "text",
+        "bind": "city",
+        "label": "City"
+       },
+       {
+        "id": "c_joined",
+        "type": "date",
+        "bind": "joined",
+        "label": "Joined"
+       }
+      ]
+     },
+     {
+      "id": "r3",
+      "controls": [
+       {
+        "id": "c_credit",
+        "type": "number",
+        "bind": "credit_limit",
+        "label": "Credit limit"
+       },
+       {
+        "id": "c_active",
+        "type": "checkbox",
+        "bind": "active",
+        "label": "Active"
+       }
+      ]
+     },
+     {
+      "id": "r4",
+      "controls": [
+       {
+        "id": "c_save",
+        "type": "button",
+        "label": "Save"
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "name": "ProductForm",
+    "title": "Product",
+    "entity": "Product",
+    "rows": [
+     {
+      "id": "r1",
+      "controls": [
+       {
+        "id": "p_name",
+        "type": "text",
+        "bind": "name",
+        "label": "Product name"
+       }
+      ]
+     },
+     {
+      "id": "r2",
+      "controls": [
+       {
+        "id": "p_cat",
+        "type": "text",
+        "bind": "category",
+        "label": "Category"
+       }
+      ]
+     },
+     {
+      "id": "r3",
+      "controls": [
+       {
+        "id": "p_price",
+        "type": "number",
+        "bind": "unit_price",
+        "label": "Unit price",
+        "validate": [
+         {
+          "expr": "unit_price >= 0",
+          "message": "Price must not be negative"
+         }
+        ],
+        "default": "0"
+       }
+      ]
+     },
+     {
+      "id": "r4",
+      "controls": [
+       {
+        "id": "p_disc",
+        "type": "checkbox",
+        "bind": "discontinued",
+        "label": "Discontinued",
+        "default": "false"
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "name": "OrderForm",
+    "title": "Order",
+    "entity": "Order",
+    "rows": [
+     {
+      "id": "r1",
+      "controls": [
+       {
+        "id": "o_cust",
+        "type": "combo",
+        "bind": "customer_id",
+        "label": "Customer",
+        "source": {
+         "entity": "Customer",
+         "value": "customerid",
+         "display": "name"
+        }
+       }
+      ]
+     },
+     {
+      "id": "r2",
+      "controls": [
+       {
+        "id": "o_status",
+        "type": "text",
+        "bind": "status",
+        "label": "Status",
+        "default": "'new'"
+       },
+       {
+        "id": "o_date",
+        "type": "date",
+        "bind": "order_date",
+        "label": "Order date",
+        "default": "today()"
+       }
+      ]
+     },
+     {
+      "id": "r3",
+      "controls": [
+       {
+        "id": "o_ship",
+        "type": "date",
+        "bind": "ship_date",
+        "label": "Ship date",
+        "visible": "status == 'shipped'",
+        "validate": [
+         {
+          "expr": "isnull(ship_date) || ship_date >= order_date",
+          "message": "Ship date cannot be before the order date"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "id": "r4",
+      "controls": [
+       {
+        "id": "o_notes",
+        "type": "text",
+        "bind": "notes",
+        "label": "Notes",
+        "visible": "!isnull(notes) || status == 'open'"
+       }
+      ]
+     },
+     {
+      "id": "r5",
+      "controls": [
+       {
+        "id": "o_lines",
+        "type": "subform",
+        "label": "Lines",
+        "child": {
+         "entity": "OrderLine",
+         "link": "order_id",
+         "parentKey": "orderid"
+        },
+        "columns": [
+         "product_id",
+         "qty",
+         "discount"
+        ]
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "name": "OrderLineForm",
+    "title": "Order line",
+    "entity": "OrderLine",
+    "rows": [
+     {
+      "id": "r1",
+      "controls": [
+       {
+        "id": "l_prod",
+        "type": "combo",
+        "bind": "product_id",
+        "label": "Product",
+        "source": {
+         "entity": "Product",
+         "value": "productid",
+         "display": "name"
+        }
+       }
+      ]
+     },
+     {
+      "id": "r2",
+      "controls": [
+       {
+        "id": "l_qty",
+        "type": "number",
+        "bind": "qty",
+        "label": "Quantity",
+        "validate": [
+         {
+          "expr": "qty > 0",
+          "message": "Quantity must be more than zero"
+         }
+        ]
+       },
+       {
+        "id": "l_disc",
+        "type": "number",
+        "bind": "discount",
+        "label": "Discount",
+        "default": "0",
+        "validate": [
+         {
+          "expr": "discount >= 0 && discount <= 1",
+          "message": "Discount is between 0 and 1"
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "name": "CreditReviewForm",
+    "title": "Credit review",
+    "entity": "Customer",
+    "rows": [
+     {
+      "id": "r1",
+      "controls": [
+       {
+        "id": "v_name",
+        "type": "text",
+        "bind": "name",
+        "label": "Customer"
+       }
+      ]
+     },
+     {
+      "id": "r2",
+      "controls": [
+       {
+        "id": "v_active",
+        "type": "checkbox",
+        "bind": "active",
+        "label": "Active"
+       }
+      ]
+     },
+     {
+      "id": "r3",
+      "controls": [
+       {
+        "id": "v_credit",
+        "type": "number",
+        "bind": "credit_limit",
+        "label": "Credit limit",
+        "visible": "active",
+        "validate": [
+         {
+          "expr": "credit_limit <= 100000",
+          "message": "Limit is too high"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "id": "r4",
+      "controls": [
+       {
+        "id": "v_city",
+        "type": "text",
+        "bind": "city",
+        "label": "City",
+        "visible": "active && credit_limit > 1000"
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ "cases": [
+  {
+   "form": "ProductForm",
+   "record": {
+    "name": "Widget",
+    "unit_price": -5
+   },
+   "errors": [
+    {
+     "control": "p_price",
+     "message": "Price must not be negative"
+    }
+   ],
+   "unknown": []
+  },
+  {
+   "form": "ProductForm",
+   "record": {
+    "unit_price": 1
+   },
+   "errors": [
+    {
+     "control": "p_name",
+     "message": "Product name is required"
+    }
+   ],
+   "unknown": []
+  },
+  {
+   "form": "ProductForm",
+   "record": {
+    "name": "Widget",
+    "unit_price": 5
+   },
+   "errors": [],
+   "unknown": []
+  },
+  {
+   "form": "ProductForm",
+   "record": {},
+   "errors": [
+    {
+     "control": "p_price",
+     "message": "Price must not be negative"
+    },
+    {
+     "control": "p_name",
+     "message": "Product name is required"
+    },
+    {
+     "control": "p_price",
+     "message": "Unit price is required"
+    }
+   ],
+   "unknown": [],
+   "note": "rule errors come first, then required errors, each in control order. A rule on an empty field fails."
+  },
+  {
+   "form": "ProductForm",
+   "record": {
+    "name": "x",
+    "unit_price": "5"
+   },
+   "errors": [
+    {
+     "control": "p_price",
+     "message": "Price must not be negative"
+    }
+   ],
+   "unknown": [],
+   "note": "a number held as text is not a number"
+  },
+  {
+   "form": "ProductForm",
+   "record": {
+    "name": "",
+    "unit_price": 1
+   },
+   "errors": [
+    {
+     "control": "p_name",
+     "message": "Product name is required"
+    }
+   ],
+   "unknown": [],
+   "note": "an empty string counts as empty"
+  },
+  {
+   "form": "ProductForm",
+   "record": {
+    "name": "x",
+    "unit_price": 0
+   },
+   "errors": [],
+   "unknown": [],
+   "note": "zero is a value"
+  },
+  {
+   "form": "ProductForm",
+   "record": {
+    "name": "x",
+    "unit_price": 1,
+    "hacker": 1,
+    "productid": 3
+   },
+   "errors": [],
+   "unknown": [
+    "hacker",
+    "productid"
+   ],
+   "note": "a key that no control binds is unknown"
+  },
+  {
+   "form": "CreditReviewForm",
+   "record": {
+    "name": "A",
+    "active": false,
+    "credit_limit": 999999
+   },
+   "errors": [],
+   "unknown": []
+  },
+  {
+   "form": "CreditReviewForm",
+   "record": {
+    "name": "A",
+    "active": true,
+    "credit_limit": 999999
+   },
+   "errors": [
+    {
+     "control": "v_credit",
+     "message": "Limit is too high"
+    }
+   ],
+   "unknown": []
+  },
+  {
+   "form": "CreditReviewForm",
+   "record": {
+    "name": "A",
+    "active": true
+   },
+   "errors": [
+    {
+     "control": "v_credit",
+     "message": "Limit is too high"
+    }
+   ],
+   "unknown": [],
+   "note": "a comparison with null is false, so the rule fails"
+  },
+  {
+   "form": "CreditReviewForm",
+   "record": {},
+   "errors": [
+    {
+     "control": "v_name",
+     "message": "Customer is required"
+    }
+   ],
+   "unknown": []
+  },
+  {
+   "form": "CreditReviewForm",
+   "record": {
+    "name": "A",
+    "active": true,
+    "credit_limit": 100000
+   },
+   "errors": [],
+   "unknown": [],
+   "note": "the limit itself is allowed"
+  },
+  {
+   "form": "OrderForm",
+   "record": {
+    "customer_id": 1,
+    "status": "new",
+    "order_date": "2026-03-10"
+   },
+   "errors": [],
+   "unknown": []
+  },
+  {
+   "form": "OrderForm",
+   "record": {
+    "customer_id": 1,
+    "status": "shipped",
+    "order_date": "2026-03-10",
+    "ship_date": "2026-03-01"
+   },
+   "errors": [
+    {
+     "control": "o_ship",
+     "message": "Ship date cannot be before the order date"
+    }
+   ],
+   "unknown": []
+  },
+  {
+   "form": "OrderForm",
+   "record": {
+    "customer_id": 1,
+    "status": "shipped",
+    "order_date": "2026-03-10",
+    "ship_date": "2026-03-12"
+   },
+   "errors": [],
+   "unknown": []
+  },
+  {
+   "form": "OrderForm",
+   "record": {
+    "customer_id": 1,
+    "status": "new",
+    "order_date": "2026-03-10",
+    "ship_date": "2026-03-01"
+   },
+   "errors": [],
+   "unknown": [],
+   "note": "the ship date control is hidden, so its rule is not checked"
+  },
+  {
+   "form": "OrderForm",
+   "record": {
+    "status": "new",
+    "order_date": "2026-03-10"
+   },
+   "errors": [
+    {
+     "control": "o_cust",
+     "message": "Customer is required"
+    }
+   ],
+   "unknown": []
+  },
+  {
+   "form": "OrderForm",
+   "record": {
+    "customer_id": 1,
+    "status": "",
+    "order_date": ""
+   },
+   "errors": [
+    {
+     "control": "o_status",
+     "message": "Status is required"
+    },
+    {
+     "control": "o_date",
+     "message": "Order date is required"
+    }
+   ],
+   "unknown": []
+  },
+  {
+   "form": "OrderForm",
+   "record": {
+    "customer_id": 1,
+    "status": "shipped",
+    "order_date": "2026-03-10"
+   },
+   "errors": [],
+   "unknown": [],
+   "note": "an empty ship date passes through isnull"
+  },
+  {
+   "form": "OrderLineForm",
+   "record": {
+    "product_id": 1,
+    "qty": 5,
+    "discount": 0.1
+   },
+   "errors": [],
+   "unknown": []
+  },
+  {
+   "form": "OrderLineForm",
+   "record": {
+    "product_id": 1,
+    "qty": 0,
+    "discount": 0
+   },
+   "errors": [
+    {
+     "control": "l_qty",
+     "message": "Quantity must be more than zero"
+    }
+   ],
+   "unknown": []
+  },
+  {
+   "form": "OrderLineForm",
+   "record": {
+    "product_id": 1,
+    "qty": 2,
+    "discount": 2
+   },
+   "errors": [
+    {
+     "control": "l_disc",
+     "message": "Discount is between 0 and 1"
+    }
+   ],
+   "unknown": []
+  },
+  {
+   "form": "OrderLineForm",
+   "record": {
+    "product_id": 1,
+    "qty": 2
+   },
+   "errors": [
+    {
+     "control": "l_disc",
+     "message": "Discount is between 0 and 1"
+    }
+   ],
+   "unknown": []
+  },
+  {
+   "form": "OrderLineForm",
+   "record": {},
+   "errors": [
+    {
+     "control": "l_qty",
+     "message": "Quantity must be more than zero"
+    },
+    {
+     "control": "l_disc",
+     "message": "Discount is between 0 and 1"
+    },
+    {
+     "control": "l_prod",
+     "message": "Product is required"
+    },
+    {
+     "control": "l_qty",
+     "message": "Quantity is required"
+    }
+   ],
+   "unknown": []
+  },
+  {
+   "form": "OrderLineForm",
+   "record": {
+    "product_id": 1,
+    "qty": 1,
+    "discount": 1,
+    "order_id": 7
+   },
+   "errors": [],
+   "unknown": [
+    "order_id"
+   ]
+  },
+  {
+   "form": "CustomerForm",
+   "record": {
+    "name": "Ada"
+   },
+   "errors": [],
+   "unknown": []
+  },
+  {
+   "form": "CustomerForm",
+   "record": {
+    "city": "Leeds"
+   },
+   "errors": [
+    {
+     "control": "c_name",
+     "message": "Name is required"
+    }
+   ],
+   "unknown": []
+  }
+ ]
+}

@@ -43,6 +43,12 @@ export function failedRules(def: Definition, form: Form, rec: Rec, now = new Dat
   return out;
 }
 
+/** Keys of a record that no control on the form binds to. The server refuses a record that has any. */
+export function unknownFields(form: Form, record: Record<string, unknown>): string[] {
+  const bound = new Set(allControls(form).flatMap((c) => ("bind" in c ? [c.bind] : [])));
+  return Object.keys(record).filter((k) => !bound.has(k));
+}
+
 export function renderForm(def: Definition, formName: string, opts: RenderOptions = {}): FormView {
   const found = def.forms.find((f) => f.name === formName);
   if (!found) throw new Error(`unknown form ${formName}`);

@@ -26,7 +26,7 @@ What is not measured: the share of tasks that users complete unaided, the median
 
 The spike changes the design in four ways:
 
-1. **The expression language must exist on the server too.** The server has to check the same validation rules, and Phase 1's backend is Python. The prototype's evaluator is TypeScript.
+1. **The expression language needs a server implementation, and now has one.** The server must check the same rules, and Phase 1's backend is Python. I wrote a Python evaluator and a written specification ([docs/EXPRESSIONS.md](../EXPRESSIONS.md)). Both evaluators pass the same 285 conformance cases, and agreed on 150,000 random expressions.
 2. **Build the editor, and do not adopt one.** One candidate has a commercial licence and cannot be used without a purchase. The closest open candidate may need code in its conditions, which the design forbids, but I could not verify that. This is a judgement, and I did not test it.
 3. **Edit by property panel first, and add drag and drop as an extra.** Every move works from buttons. Drag and drop works too, but it is the only part a keyboard cannot reach without the buttons.
 4. **A rename is safe to undo only before publish.** The data change is meant to run at publish, so an undo before then costs nothing. After publish, the design already says that a rename needs a snapshot restore. Wiring the migration into publish is not done.
@@ -97,7 +97,7 @@ A query that the rewriter cannot place with certainty is listed for review. It i
 - Node.js 22.22, TypeScript 5.9, PostgreSQL 16.14, Chromium 141, Playwright 1.63, and axe-core 4.13.
 - One Linux container. No screen reader, and no Access.
 - Prototype: about 1,340 lines of source and about 790 lines of tests, in `spikes/spike5-form-editor/`.
-- Run `npm test` for the 64 tests. Run `npm run serve` for a session.
+- Run `npm test` for the 95 tests. Run `npm run serve` for a session.
 
 ## Measures
 
@@ -206,20 +206,47 @@ The permission rule is the one from Phase 1: Manage covers Design, and Design do
 
 ## Findings and design implications
 
-### The expression language needs a server implementation
+### The expression language has two implementations that agree
 
-The server must check the rules, because a browser check can be bypassed. The prototype's server is in TypeScript, so it uses the same evaluator as the browser. The product's backend is Python, so the options are:
+The server must check the rules, because a browser check can be bypassed. The prototype's server is TypeScript, but the product's backend is Python. I chose the first of two options and built it:
 
-- Write the evaluator twice, in TypeScript and Python, with a shared set of test cases that both must pass.
-- Run server-side checks through the Spike 3 sandbox. This costs time on every save.
+- **Chosen:** write the evaluator twice, in TypeScript and in Python, with a written specification and a shared set of test cases that both must pass.
+- **Not chosen:** run server-side checks through the Spike 3 sandbox. This costs time on every save.
 
-I recommend the first option. The language is small, and shared test cases keep the two evaluators together. Null handling and string comparison need the most care.
+What was built:
+
+- **A specification** in [docs/EXPRESSIONS.md](../EXPRESSIONS.md). The TypeScript evaluator from the spike was too loose to copy. It inherited JavaScript's habit of turning a string into a number, and it formatted numbers in a way that Python formats differently. I tightened the language: equality is strict, only two numbers or two strings have an order, a number and a string never mix, and every function has a fixed number of arguments. I also added limits on length and nesting.
+- **A Python evaluator and form checker** in `backend/a2w/expr.py` and `backend/a2w/formrules.py`.
+- **Shared test cases** in `spec/expression/`: 233 expression cases, 15 rename cases, 9 reference cases, and 28 form cases. I worked out the expected results by hand from the specification, not by running either program.
+- **A differential test** that sends random expressions, valid and damaged, through both evaluators.
+
+Table 5 shows the results.
+
+**Table 5. Agreement between the two evaluators**
+
+| Check | Result |
+|---|---|
+| Shared cases, TypeScript | All pass |
+| Shared cases, Python | All pass |
+| Random expressions in the committed test | 10,000 cases in 4 runs, with no differences |
+| A one-off larger run | 150,000 cases, of which 99,249 were valid, with no differences |
+| Planted bugs, in the cases | 3 of 3 caught |
+| Planted bugs, in the random test | 3 of 3 caught |
+
+The shared cases found one problem before Python existed: I had assumed `1.` was a valid number, but the tokenizer never accepted it. I changed the specification to match.
+
+The random test checks four things for every case: whether the expression is valid, its value, the fields it refers to, and the result of a rename. The generator covers Unicode text, large numbers, odd records, and a third of the cases are damaged on purpose. One planted bug, a length that counted UTF-16 units, showed up in only one or two cases per run, so rare paths are thinly covered. The shared cases cover them directly.
+
+What is not done:
+
+- The server does not call the Python checker yet. The Phase 1 backend has no forms, so there is nowhere to call it from. Phase 2 adds forms.
+- `today()` uses whatever time the caller passes. The browser and the server do not yet share one event time.
 
 ### Build the editor
 
-Table 5 compares the candidates. Licences come from the npm registry and from the licence files in the packages. I did not integrate any candidate, so the fit column is my judgement.
+Table 6 compares the candidates. Licences come from the npm registry and from the licence files in the packages. I did not integrate any candidate, so the fit column is my judgement.
 
-**Table 5. Build or adopt**
+**Table 6. Build or adopt**
 
 | Candidate | Licence | What it is | Fit with the definition model |
 |---|---|---|---|
@@ -245,7 +272,6 @@ My estimate for a production Phase 2 editor is 8 to 12 engineer-weeks, and for a
 - Drag and drop on touch screens.
 - Querying and editing saved queries and reports, which are P2 in the PRD.
 - A screen-reader review, and fixes.
-- The Python evaluator, with the shared test cases.
 
 ### Access form features that the renderer does not support
 
@@ -264,6 +290,7 @@ This list comes from my general knowledge of Access. It does not come from real 
 ### Other findings
 
 - **Positions in a move.** Counting positions after the control leaves its row was the one rule that needed to be fixed in writing, because an emptied row shifts every index.
+- **Strict rules help the second implementation.** A rule on an empty field fails, because a comparison with null is false. An owner must write `isnull(x) || x > 0` for an optional field. The specification says so, but the editor does not warn about it yet.
 - **Preview state.** The first browser run found that clicking "Preview rename" reset the chosen field and the new name, so "Apply rename" used empty values. The editor now keeps the choice across redraws.
 - **The log needs the ids.** New controls and rows get their ids when the edit is made, and the id is stored in the operation. Replaying the log then gives the same draft.
 - **Handlers are never edited.** A handler is code, and a person must decide how a rename affects it.
@@ -292,6 +319,9 @@ All spike code is in `spikes/spike5-form-editor/`. It is prototype code and must
 | `src/ui/` | Renderer, editor, and page entry point |
 | `src/server/` | Draft workflow, permissions, and the session server |
 | `fixtures/` | Five synthetic forms, queries, and sample data |
-| `test/` | 64 tests: expressions, operations, a randomised log test, rename against PostgreSQL, the workflow, and Chromium |
+| `test/` | 95 tests: expressions, the shared vectors, operations, a randomised log test, rename against PostgreSQL, the workflow, and Chromium |
+| `tools/` | A batch evaluator for the differential test, and the script that writes the form vectors |
+| `../../backend/a2w/expr.py`, `formrules.py` | The Python evaluator and the server-side form checker |
+| `../../spec/expression/` | The shared conformance cases |
 | `public/` | Page and styles |
 | `../../docs/spikes/spike-5-screens/` | Screenshots of the five rendered forms |

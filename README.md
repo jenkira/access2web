@@ -30,9 +30,11 @@ Not built yet: queries (Spike 2), forms and reports (Phase 2), object-level and 
 
 | Path | Contents |
 |---|---|
-| `backend/a2w/` | Python backend: analyser, VBA classifier, DDL generator, publish, authorisation, runtime, audit, API |
+| `backend/a2w/` | Python backend: analyser, VBA classifier, DDL generator, publish, authorisation, runtime, audit, API, and the expression evaluator for form rules |
 | `backend/tests/` | Unit tests and integration tests that run against PostgreSQL |
 | `web/` | TypeScript front end, with no runtime dependencies |
+| `spec/expression/` | Conformance cases that the Python and TypeScript expression evaluators must both pass. The language is described in [docs/EXPRESSIONS.md](docs/EXPRESSIONS.md). |
+| `spikes/` | Prototype code for the spikes. Not product code. Reports are in `docs/spikes/`. |
 | `deploy/helm/access2web/` | Helm chart |
 | `Dockerfile` | Image that serves the API and the built front end |
 
