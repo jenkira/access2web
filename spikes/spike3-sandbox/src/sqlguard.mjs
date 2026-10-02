@@ -5,7 +5,7 @@ export class SqlRejected extends Error {
 }
 
 const START = /^\s*(select|insert|update|delete|with)\b/i;
-const FORBIDDEN_CHARS = /['"\;]|--|\/\*|\$\$/;
+const FORBIDDEN_CHARS = new RegExp(["['\"\\\\;]", "--", "/\\*", "\\$\\$"].join("|"));
 // Functions that can change the session, read the server's files, or reach out of the database.
 const FORBIDDEN_WORDS = /\b(set_config|current_setting|pg_read_file|pg_read_binary_file|pg_ls_dir|pg_stat_file|lo_import|lo_export|lo_get|dblink\w*|copy|pg_terminate_backend|pg_cancel_backend|pg_reload_conf|pg_advisory_lock|query_to_xml|database_to_xml)\b/i;
 
