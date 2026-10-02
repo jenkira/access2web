@@ -33,6 +33,7 @@ Table 1 lists each decision, its status, and its source.
 | D11 | Include editing of migrated applications: drafts, version history, rollback, and safe data changes | Accepted | Added on 2 October 2026. Adds FR-23 to FR-31 to the PRD. |
 | D12 | The web application becomes the system of record after the first published edit. Re-import stays available only for applications with no published edits. An owner who wants to re-import an edited application creates a separate application. | Accepted | Proposed in review, accepted 2 October 2026. |
 | D13 | Do not require a second approver to publish a change in version 1, but make the rule configurable for each application | Accepted | Proposed in review, accepted 2 October 2026. Adds FR-32. |
+| D14 | Deploy on Kubernetes, packaged as container images and a Helm chart, with no dependence on one cloud vendor | Accepted | Added on 2 October 2026. The Windows worker and the translation model can run in the cluster or outside it behind the same queue and storage interfaces. |
 
 ## Open items
 
@@ -46,9 +47,11 @@ Table 2 lists the items that still need an answer, who can answer them, and when
 | O2 | Which three to five databases do the spikes use? Include a heavy-VBA file, a complex-query file, a split database, and both file formats. | Application owner | Spikes start |
 | O3 | Does the organisation's Microsoft licensing cover Access on a Windows Server worker? The owner accepted the support risk, but the licence terms are a separate matter. | Licensing contact | Spikes start |
 | O4 | Where must data live, and does any application hold personal or health information that needs a privacy review? | Privacy officer | Design is final |
-| O5 | Is a GPU server available for Spike 4, and what is the budget for production hosting? | Platform team | Spike 4 starts |
+| O5 | Is a GPU node or server available for Spike 4, and what is the budget for production hosting? | Platform team | Spike 4 starts |
 | O6 | Who maintains handlers after publication, and who owns an application when its author leaves? | Application owner | Build starts |
 | O7 | How does a re-import (FR-12) merge changes with an owner's edits to the definition? Decision D12 removes the need to merge for edited applications, so this item applies only to unedited ones. | Design team | FR-12 is built (P2) |
+| O8 | Which Kubernetes platform and version does the organisation run, managed or on-premises? Does it offer Windows node pools, GPU node pools, a network policy engine that works on Windows nodes, and an ingress controller? | Platform team | Design is final |
+| O9 | How does the organisation provide PostgreSQL, S3-compatible object storage, a secrets store, and a container registry: as managed services, or inside the cluster? | Platform team | Design is final |
 
 ## Gaps found in review
 

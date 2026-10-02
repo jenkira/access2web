@@ -28,7 +28,7 @@ The PRD leaves several choices open. This document proposes an answer for each o
 | Table, data, and query extraction | Jackcess (Java) on Linux, cross-checked with mdbtools and a Python reader | Open source, reads `.mdb` and `.accdb`, and needs no Access licence | Proposed, needs spike 1 |
 | Form, report, macro, and VBA extraction | Windows Server worker that drives Microsoft Access with PowerShell | No open source tool found that reads form and report definitions. The owner has run this kind of automation on server operating systems. | Accepted risk (D1, D2). Spike 1 measures stability. |
 | AI model for translation | A private model hosted by the organisation, behind a provider interface | VBA source can contain credentials and business rules, so it stays inside the network | Accepted (D9). Spike 4 tests it. |
-| Hosting | Containers on the organisation's platform, with a small Windows worker pool | Matches existing operations | Proposed |
+| Hosting | Kubernetes, with Linux node pools, a GPU node pool for the model, and either a Windows node pool or external Windows VMs for the worker | The owner requires deployment on Kubernetes | Accepted (D14). Placement of the Windows worker depends on Spike 1. |
 
 ## Goals and constraints
 
@@ -39,6 +39,7 @@ The design must meet the requirements in the PRD. These constraints shape it mos
 - Conversion is partial by nature. The system must report what it did not convert, and must never hide a gap.
 - Each application's data must be isolated from every other application's data.
 - The audit log must be append-only.
+- The system must deploy on Kubernetes (decision D14), and must not depend on one cloud vendor.
 
 ## Architecture overview
 
@@ -488,17 +489,89 @@ Table 8 lists the main threats and how the design addresses them.
 | Audit log tampering | Insert-only roles and a hash chain |
 | Credentials in VBA source leave the network | Strip credential patterns, log requests, and offer a private translation deployment |
 
+## Deployment on Kubernetes
+
+The system deploys on Kubernetes (decision D14). Kubernetes provides scheduling, scaling, rolling updates, and self-healing for the stateless Linux services. Two components do not fit as cleanly: the Windows worker, because Access runs only on Windows, and the translation model, because it needs a GPU.
+
+### Workloads
+
+Table 9 lists each component with its Kubernetes workload, node pool, and scaling method.
+
+**Table 9. Kubernetes workloads**
+
+| Component | Workload | Node pool | Scaling |
+|---|---|---|---|
+| Runtime API | Deployment | Linux | Autoscale on CPU and request rate, with at least two replicas |
+| Authorisation service | Deployment | Linux | Autoscale, with at least two replicas |
+| Handler sandbox | Wasm engine inside the runtime API pods, or a separate Deployment if isolation tests require it | Linux | Scales with the runtime API |
+| Upload service | Deployment | Linux | Autoscale |
+| Review, edit, and publish service | Deployment | Linux | At least two replicas |
+| Extractor workers, analyser and converter, VBA pipeline | Job for each import, or a Deployment that reads a queue | Linux | Scale on queue depth |
+| Translation model | Deployment with a GPU resource request | GPU | One replica for each GPU, scaled by hand in version 1 |
+| Windows worker | Job for each import | Windows, or outside the cluster | Scale on queue depth, limited by the number of Windows nodes |
+| Connection pooler | Deployment | Linux | At least two replicas |
+| PostgreSQL | Managed service, or a StatefulSet run by an operator | Linux with fast storage | One primary and at least one replica |
+| Object storage | S3-compatible service | Not applicable | Not applicable |
+
+### Windows worker placement
+
+The worker takes import jobs from a queue and writes the exported text to object storage. Because this interface does not depend on where the worker runs, two placements are possible with no other change:
+
+- **Windows node pool in the cluster.** The worker runs as a Kubernetes Job, scheduled by taints and node selectors. For process isolation, the container image build must match the node's Windows build. Windows pods cannot run privileged. Hyper-V isolation through a runtime class would give a VM-like boundary, but the survey found only older sources, which described that work as slow, so its status is unverified. Spike 1 tests it.
+- **External Windows VM pool.** The worker runs outside the cluster and reads the same queue. This placement keeps the VM isolation of the original design, and removes any dependence on Windows support in the cluster.
+
+The design recommends building to the queue interface and choosing the placement after Spike 1. A process-isolated Windows container shares the host kernel, which is a weaker boundary for untrusted files. Do not use it unless the security owner accepts the risk.
+
+### Translation model placement
+
+The model runs on a GPU node pool with the GPU device plugin installed. Model weights load from object storage or a persistent volume at start-up, which can take minutes, so the readiness probe must wait for the load. Only the VBA pipeline pods can call the model, and the model pod has no outbound network access.
+
+### Packaging and configuration
+
+The deployment uses these conventions:
+
+- Every Linux component is a container image, built reproducibly, scanned for vulnerabilities, and stored in the organisation's registry.
+- A Helm chart installs the workloads, services, ingress, network policies, autoscalers, and disruption budgets. Values files hold the settings for each environment.
+- Configuration lives in ConfigMaps. Secrets come from the organisation's secrets store, through Kubernetes Secrets or an external secrets operator, and never appear in images or application definitions.
+- Separate namespaces hold the platform services, the import workers, and the model.
+
+### Networking and security
+
+The deployment applies these controls:
+
+- Network policies deny all traffic by default, and each workload has an allow-list.
+- The extractor, the VBA pipeline, the handler sandbox, and the model have no outbound network access.
+- Linux pods run as a non-root user, with a read-only root file system, no privilege escalation, and the restricted pod security profile.
+- Whether the cluster's network plugin enforces policies on Windows nodes is unverified. Spike 1 tests it.
+- An ingress controller or gateway terminates TLS. The portal and users reach `/apps/{slug}` through it.
+- Each application's database role has its credentials in a separate secret.
+
+### Operations
+
+The deployment supports these operating needs:
+
+- **Availability.** At least two replicas of each stateless service, spread across nodes and zones, with disruption budgets and readiness and liveness probes.
+- **Rolling upgrades.** Pods from two releases run together during an upgrade, so the runtime must read both the current and the previous definition schema version. Control database migrations run as a pre-upgrade Job and must stay compatible with the previous release.
+- **Permission cache invalidation.** All runtime pods receive invalidation events through a shared channel. The proposal is PostgreSQL `LISTEN` and `NOTIFY`.
+- **Queue.** A PostgreSQL-backed job queue limits the number of components. This is a proposal that needs confirmation.
+- **Observability.** Structured logs to standard output, metrics in Prometheus format, and traces through OpenTelemetry. The audit store stays separate from operational logs.
+- **Schema snapshots.** Before a destructive change, a Job exports the application's schema to object storage. Database backups remain the responsibility of the platform, and the quarterly restore test still applies.
+
+### What the design does not assume
+
+The design does not assume a cloud vendor, a service mesh, or a particular database operator. If the organisation requires service-to-service encryption inside the cluster, a mesh or mutual TLS is an addition, not a change.
+
 ## Non-functional design
 
-Table 9 shows how the design meets the PRD's non-functional requirements.
+Table 10 shows how the design meets the PRD's non-functional requirements.
 
-**Table 9. Non-functional requirements and design response**
+**Table 10. Non-functional requirements and design response**
 
 | Requirement | Design response |
 |---|---|
 | Open a form with 1,000 records in under 2 seconds | Server-side paging, indexes from the source, cached permission results, and query plans checked in tests |
-| 2,000 concurrent users and 200 applications | Stateless runtime API instances behind a load balancer, and a connection pool for each application role |
-| 99.5% availability in business hours | At least two runtime instances, a replicated database, and health checks. Authoring services can have lower availability. |
+| 2,000 concurrent users and 200 applications | Stateless runtime API pods with horizontal autoscaling behind an ingress, and a connection pooler for each application role |
+| 99.5% availability in business hours | At least two runtime pods spread across nodes, disruption budgets, a replicated database, and health probes. Authoring services can have lower availability. |
 | Encryption | TLS 1.2 or later in transit, and disk and object storage encryption at rest |
 | Accessibility (WCAG 2.2 level AA) | Accessible component library, and automated and manual checks on generated forms |
 | Backup | Daily backups, and a quarterly restore test |
@@ -511,14 +584,14 @@ The test plan has these parts:
 - **Permission matrix tests.** Automated tests for each role, resource, and level, including the cases that must deny.
 - **Runtime component tests.** Each control and rule type has tests on its own.
 - **Sandbox escape tests.** A suite of hostile handlers that try to reach the network, file system, and other schemas.
-- **Load tests.** Run against the targets in Table 9.
+- **Load tests.** Run against the targets in Table 10.
 - **Security review.** A penetration test before the first production release.
 
 ## Delivery plan
 
-Work follows the phases in the PRD. Five spikes come first, because they test the assumptions that carry the most risk. The [spike plan](SPIKE-PLAN.md) gives the method for each. Table 10 lists them.
+Work follows the phases in the PRD. Five spikes come first, because they test the assumptions that carry the most risk. The [spike plan](SPIKE-PLAN.md) gives the method for each. Table 11 lists them.
 
-**Table 10. Spikes**
+**Table 11. Spikes**
 
 | Spike | Question | Pass condition |
 |---|---|---|
@@ -528,7 +601,7 @@ Work follows the phases in the PRD. Five spikes come first, because they test th
 | 4. Local model | Can a locally hosted model translate VBA to approvable handlers? | At least 50% of translatable procedures pass their tests unedited, and no manual-redesign procedure receives a translation |
 | 5. Form editor | Can the runtime and operation model support a visual form editor for the common edits? | At least 80% of common edit tasks completed unaided, and a rename updates every reference |
 
-The owner adopted the thresholds in Table 10 (decision D5) and can revise them before the spikes start.
+The owner adopted the thresholds in Table 11 (decision D5) and can revise them before the spikes start.
 
 ## Open questions
 
@@ -541,9 +614,11 @@ The [decisions log](DECISIONS.md) holds the open items, their owners, and the po
 - How does a re-import (FR-12) merge changes with an owner's edits to the definition?
 - Can the VBA extraction method for `.accdb` files, which avoids Access, be made reliable?
 - Does the organisation's licensing cover Access on a Windows Server worker pool?
+- Which Kubernetes platform and version does the organisation run, and does it offer Windows nodes, GPU nodes, a network policy engine, and an ingress controller?
 
 ## Risks
 
+- The cluster might not offer Windows nodes, GPU nodes, or network policy enforcement on Windows. The queue interface lets the worker and the model run outside the cluster, but that adds components to operate.
 - The automation tier might not meet cost, licence, or security requirements, and Microsoft does not support unattended Automation of Office. Access can hang, so the design assumes failures and limits each job. Spike 1 tests this first.
 - The runtime must support every control and rule type. A gap shows up as a conversion failure for owners, so the conversion corpus must cover the controls in use.
 - Jet SQL has many edge cases. Query translation could take longer than planned, and the fallback is to mark queries as not converted.

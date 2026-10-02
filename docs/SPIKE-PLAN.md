@@ -6,7 +6,7 @@
 | Owner | Clint Jenkinson |
 | Date | 2 October 2026 |
 | Version | 0.1 |
-| Related | [Technical design document](TDD.md), Table 10, and the [decisions log](DECISIONS.md) |
+| Related | [Technical design document](TDD.md), Table 11, and the [decisions log](DECISIONS.md) |
 
 ## Summary
 
@@ -84,11 +84,12 @@ If the method is reliable, VBA inventory and classification can run on Linux wit
 
 ### Part 1d: worker isolation
 
-The design proposes a disposable VM for each job. This part compares that choice with a container. Test these three configurations:
+The design proposes a disposable VM for each job. This part compares that choice with a container. Test these four configurations:
 
 1. A Windows VM, restored from a snapshot for each job.
 2. A Windows container with Hyper-V isolation.
 3. A Windows container with process isolation.
+4. A Kubernetes Job on a Windows node pool, with process isolation, and with Hyper-V isolation through a runtime class if the cluster supports it. Check that the image build matches the node build.
 
 For each configuration, check these points:
 
@@ -98,6 +99,7 @@ For each configuration, check these points:
 - Memory and CPU use for each job.
 - Whether network access blocks fully.
 - Whether a hostile file can reach the host or another job's data. Test with the marker file from Part 1b.
+- In the Kubernetes configuration, whether the cluster's network policy engine blocks outbound traffic from a Windows pod, and how long a Windows node takes to start when the pool scales up.
 
 A process-isolated container shares the host kernel. For untrusted files this is a weaker boundary than a VM, so the team must not choose it unless the security owner accepts the risk. A Linux container cannot run Access, and running Access under a compatibility layer such as Wine is not a supported approach. Linux containers are suitable for the native tier only.
 
@@ -213,6 +215,7 @@ To measure the sandbox:
 5. Run each handler 1,000 times with sample inputs, and record the time and memory use for each run.
 6. Write a suite of at least 20 hostile handlers, and run each one.
 7. Confirm that a handler failure rolls back the database transaction.
+8. Run the harness in a Kubernetes pod with CPU and memory limits, and confirm that the sandbox limits and the pod limits both hold under load.
 
 The hostile suite must try to:
 
@@ -282,6 +285,7 @@ To evaluate the model:
 8. Run the generated handlers in the Spike 3 sandbox against tests, and compare the outputs with the reference handlers.
 9. Ask the application owner to rate a sample of 15 results as approvable as is, approvable with minor edits, or not approvable.
 10. Record the time and memory use for each model.
+11. Run the best model on a GPU node in the Kubernetes cluster. Record the GPU memory, the pod start-up time including model loading, and whether a readiness probe can detect that the model is ready.
 
 ### Measures
 

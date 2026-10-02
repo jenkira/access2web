@@ -229,6 +229,7 @@ Table 4 lists the requirements, in priority order within each area. Priority P0 
 - **Compatibility:** Support current versions of Chrome, Edge, Firefox, and Safari. Meet WCAG 2.2 level AA.
 - **Isolation:** Store each application's data in a separate schema so a fault or breach in one application does not affect another.
 - **Backup:** Back up data daily and test restores every quarter.
+- **Deployment:** Run on Kubernetes. Package every component as a container image, and install them with a Helm chart. Do not depend on one cloud vendor. Support rolling upgrades of the runtime without downtime.
 
 ## User flows
 
@@ -276,6 +277,7 @@ Table 5 lists the measures that show whether the product meets its goals.
 - The systems portal exposes an API or integration point for registering applications and reading user identity.
 - A directory service, such as Microsoft Entra ID or LDAP, provides users and groups.
 - PostgreSQL is the target database engine (decision D3 in the [decisions log](DECISIONS.md)).
+- The organisation provides a Kubernetes cluster with an ingress controller and persistent storage. Windows nodes and GPU nodes are available, or the Windows worker and the translation model can run outside the cluster.
 - Source Access files are not password-protected, or the owner supplies the password at upload.
 
 ## Risks
@@ -293,6 +295,7 @@ Table 6 lists the main risks and how to reduce them.
 | Uploaded files contain malware | System compromise | Scan files, parse them in a sandbox, and never run embedded code |
 | Sensitive data is copied into a less controlled place | Privacy breach | Classify data at upload, and require explicit permission settings before publish |
 | Owners publish with permissive settings | Unintended exposure | Deny by default, and show a permissions summary at publish |
+| The cluster has no Windows or GPU nodes | The Windows worker or the translation model cannot run in the cluster | Run them outside the cluster behind the same queue and storage interfaces |
 | An edit breaks a live application | Users lose work or access | Edit in drafts, validate before publication, keep version history, and allow rollback |
 | A destructive data change loses data | Permanent loss of records | Preview affected rows, require confirmation, and take a snapshot before applying |
 | Several designers change one application | Conflicting or lost edits | Allow one active draft for each application |
@@ -305,7 +308,8 @@ The [decisions log](DECISIONS.md) records decisions and open items. The items th
 - Where must data live, and does any source database hold personal or health information that needs a privacy review?
 - Who maintains handlers after publication, and who owns an application when its author leaves?
 - Which three to five real databases do the pilot and the spikes use?
-- Is a GPU server available to host the translation model, and what is the budget?
+- Is a GPU node or server available to host the translation model, and what is the budget?
+- Which Kubernetes platform and version does the organisation run, and how does it provide PostgreSQL, object storage, a secrets store, and a container registry?
 - When the web version goes live, do users stop using the `.accdb` file, and how does the system prevent two diverging copies of the data?
 - How does the system handle tables linked to SQL Server or other ODBC sources, and tables linked from a back-end file in a split database?
 - Who writes row-level rules for each application, and how?
