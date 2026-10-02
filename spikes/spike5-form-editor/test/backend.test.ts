@@ -328,22 +328,41 @@ test("publishing ends the draft, and the page starts the next one from the new v
   assert.equal((await api("POST", `/api/apps/${slug}/versions`, who("mia"), { base_version: 2, forms })).status, 409);
 });
 
-test("Discard draft throws the edits away after a confirmation", async () => {
+test("Discard draft throws the edits, including a field rename, away after a confirmation", async () => {
   const slug = await newApp();
   const page = await open(editor(slug, "dana"));
   await page.waitForSelector("form");
+  const saved = () => page.waitForFunction(() => { const s = (window as any).__spike5.saver; return s.state === "saved" && !s.dirty; });
+  const fields = () => page.locator('[data-fk="rn-field"] option').allInnerTexts();
+  const emailBind = () => page.evaluate(() => (window as any).__spike5.editor.history.current.forms[0].rows[1].controls[0].bind);
+  const renameField = async (from: string, to: string) => { await page.selectOption("#rn-field", from); await page.fill("#rn-to", to); await page.click('[data-fk="rn-preview"]'); await page.click('[data-fk="rn-apply"]'); };
   await setLabel(page, "c_name", "Gone");
-  await draftState(page, /Draft saved/);
+  await renameField("email", "mail");
+  await saved();
+  assert.equal((await draftOf(slug, "dana")).draft.log.length, 2);
+
   page.once("dialog", (d) => d.dismiss());
   await page.click('[data-fk="discard"]');
   assert.match(await statusText(page, /Kept your draft/), /Kept your draft/);
-  assert.equal((await draftOf(slug, "dana")).draft.log.length, 1);
+  assert.deepEqual((await draftOf(slug, "dana")).draft.log.map((o: any) => o.t), ["setLabel", "renameField"], "dismissing the question keeps both edits");
+  assert.ok((await fields()).includes("mail"));
+
   page.once("dialog", (d) => d.accept());
   await page.click('[data-fk="discard"]');
   assert.match(await statusText(page, /Discarded your draft/), /Discarded/);
   assert.equal(await page.locator('label[for="ctl-CustomerForm-c_name"]').innerText(), "Name");
+  assert.ok((await fields()).includes("email") && !(await fields()).includes("mail"), "the field has its published name again");
+  assert.equal(await emailBind(), "email", "and so does the control that shows it");
+  assert.equal(await page.evaluate(() => (window as any).__spike5.editor.history.log.length), 0, "the page has no edits left");
   const after = (await draftOf(slug, "dana")).draft;
   assert.equal(after.mine, true); assert.equal(after.log.length, 0, "a fresh draft, still held by dana");
+  const live = (await api("GET", `/api/apps/${slug}/definition`, who("olive"))).body;
+  assert.ok(live.version === 1 && live.entities[0].fields.some((f: any) => f.name === "email"), "the discarded rename never reached the application");
+
+  // The fresh draft takes new edits, so the page is not left stuck after a discard.
+  await renameField("email", "contact");
+  await saved();
+  assert.deepEqual((await draftOf(slug, "dana")).draft.log.map((o: any) => [o.t, o.from, o.to]), [["renameField", "email", "contact"]]);
 });
 
 test("a saved draft that does not replay is not opened, and can be discarded", async () => {
