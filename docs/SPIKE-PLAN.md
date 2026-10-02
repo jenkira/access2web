@@ -6,7 +6,7 @@
 | Owner | Clint Jenkinson |
 | Date | 2 October 2026 |
 | Version | 0.1 |
-| Related | [Technical design document](TDD.md), Table 9, and the [decisions log](DECISIONS.md) |
+| Related | [Technical design document](TDD.md), Table 10, and the [decisions log](DECISIONS.md) |
 
 ## Summary
 

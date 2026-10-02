@@ -36,6 +36,7 @@ The system must:
 4. Record who viewed or changed data and who changed permissions.
 5. Report what it could not convert, so owners can decide on manual work.
 6. Convert common Visual Basic for Applications (VBA) logic to server-side handlers, and route everything else to manual redesign with a clear explanation.
+7. Let owners and designers change an application after migration, with drafts, version history, safe data changes, and rollback.
 
 ### Non-goals
 
@@ -47,6 +48,7 @@ The system does not:
 - Support Access Data Projects (`.adp`) or Access web apps (SharePoint-hosted).
 - Replace the systems portal. It integrates with the portal.
 - Provide offline use.
+- Match the full design capability of Microsoft Access. Version 1 of the editor covers the changes owners make most often, as listed in the next section.
 
 ## Users and roles
 
@@ -57,7 +59,7 @@ Table 1 lists the roles the system supports and what each role does.
 | Role | Description | Main tasks |
 |---|---|---|
 | Platform administrator | Manages the whole system | Configure single sign-on (SSO), manage roles, view audit logs |
-| Application owner | Owns one or more converted applications | Upload a database, review the conversion report, publish, grant permissions |
+| Application owner | Owns one or more converted applications | Upload a database, review the conversion report, edit, publish, grant permissions |
 | Application user | Uses a published application | Open the application from the portal, enter and view data |
 | Auditor | Reviews activity | View audit logs and permission reports, read-only |
 
@@ -87,6 +89,24 @@ For each analysed database, the system must generate:
 - Reports that users can view in the browser and export to PDF.
 - Validation rules and required-field checks carried over from the source.
 - Server-side handlers for VBA logic, as described in the next section.
+
+### Changes after migration
+
+Owners and designers must be able to change a migrated application without going back to Access. The system supports these changes:
+
+- Forms: add, remove, and move controls, and change labels, visibility, defaults, and validation rules.
+- Data: add a table or field, rename a table or field, and change a field's type or constraints.
+- Queries and reports: change columns, filters, grouping, and sorting.
+- Handlers: edit a translated handler or write a new one, under the same test and approval rules as translated handlers.
+
+Requirements for changes:
+
+- Edits happen in a draft copy. Users of the live application do not see a draft.
+- Publishing a draft creates a new version. The system keeps every earlier version, and lets an authorised person compare two versions and roll back to an earlier one.
+- The system classifies each data change as additive, compatible, or destructive. It applies additive changes automatically, applies compatible changes after a preview, and requires explicit confirmation, a preview of the affected rows, and a snapshot before it applies a destructive change.
+- The permission to design an application is separate from the permission to publish it.
+- Every change to an application's definition appears in the audit log with the difference.
+- Once an owner publishes an edit, the web application is the system of record. Re-import from the original `.accdb` file is then not available for that application. This is a proposal that needs the owner's decision (item O8 in the [decisions log](DECISIONS.md)).
 
 ### VBA conversion
 
@@ -134,7 +154,8 @@ The system must enforce permissions on the server, not only in the interface. Ta
 | Edit data | Table, form | Create and change records |
 | Delete data | Table, form | Remove records |
 | Run reports | Report | Run and export a report |
-| Manage application | Application | Change settings, republish, and manage permissions |
+| Design application | Application | Create drafts and edit forms, fields, queries, reports, and handlers, but not publish |
+| Manage application | Application | Change settings, publish, and manage permissions |
 
 Requirements for access control:
 
@@ -154,6 +175,7 @@ The system must record the following events, with the user, time, application, a
 - Report runs and data exports.
 - Permission grants and revocations.
 - Application upload, publish, and unpublish.
+- Changes to an application's definition, with the difference between versions.
 
 Auditors can search and export the log. Logs are append-only.
 
@@ -187,6 +209,15 @@ Table 4 lists the requirements, in priority order within each area. Priority P0 
 | FR-20 | Show original VBA beside generated code, and block publication until the owner approves or excludes each handler | P1 |
 | FR-21 | Flag manual-redesign procedures with the reason and a suggested alternative | P0 |
 | FR-22 | Classify the data in each application at upload, and block publishing until the owner confirms the classification | P1 |
+| FR-23 | Create a draft copy of a published application, with edits invisible to users until publication | P1 |
+| FR-24 | Edit forms: controls, labels, visibility, defaults, and validation rules | P1 |
+| FR-25 | Add, rename, and change tables and fields, and generate the data migration | P1 |
+| FR-26 | Classify each data change as additive, compatible, or destructive, show a preview, and require confirmation and a snapshot for destructive changes | P1 |
+| FR-27 | Keep version history, compare two versions, and roll back to an earlier version | P1 |
+| FR-28 | Provide a separate Design application permission | P1 |
+| FR-29 | Edit queries and reports | P2 |
+| FR-30 | Edit handlers, with the same sandbox tests and approval as translated handlers | P2 |
+| FR-31 | Record every definition change in the audit log, with the difference | P1 |
 
 ## Non-functional requirements
 
@@ -261,6 +292,9 @@ Table 6 lists the main risks and how to reduce them.
 | Uploaded files contain malware | System compromise | Scan files, parse them in a sandbox, and never run embedded code |
 | Sensitive data is copied into a less controlled place | Privacy breach | Classify data at upload, and require explicit permission settings before publish |
 | Owners publish with permissive settings | Unintended exposure | Deny by default, and show a permissions summary at publish |
+| An edit breaks a live application | Users lose work or access | Edit in drafts, validate before publication, keep version history, and allow rollback |
+| A destructive data change loses data | Permanent loss of records | Preview affected rows, require confirmation, and take a snapshot before applying |
+| Several designers change one application | Conflicting or lost edits | Allow one active draft for each application |
 
 ## Open questions
 
@@ -272,6 +306,7 @@ The [decisions log](DECISIONS.md) records decisions and open items. The items th
 - Which three to five real databases do the pilot and the spikes use?
 - Is a GPU server available to host the translation model, and what is the budget?
 - When the web version goes live, do users stop using the `.accdb` file, and how does the system prevent two diverging copies of the data?
+- Does the web application become the system of record after the first published edit, and does a change to a published application need a second person to approve it?
 - How does the system handle tables linked to SQL Server or other ODBC sources, and tables linked from a back-end file in a split database?
 - Who writes row-level rules for each application, and how?
 - How long does the system keep uploaded files, audit logs, and exports?
@@ -285,6 +320,6 @@ Table 7 lists the release phases and what each phase delivers.
 | Phase | Content |
 |---|---|
 | Phase 1 | Upload, analysis, table and CRUD generation, application-level permissions, portal tile, audit log, VBA extraction, inventory, and classification |
-| Phase 2 | Form and report generation, object-level and row-level permissions, VBA pilot on sample databases, fixed-mapping conversion of standard patterns |
-| Phase 3 | AI translation of VBA logic with sandbox, tests, and owner approval, based on pilot results |
+| Phase 2 | Form and report generation, object-level and row-level permissions, VBA pilot on sample databases, fixed-mapping conversion of standard patterns, drafts, version history, rollback, and editing of forms, fields, and rules |
+| Phase 3 | AI translation of VBA logic with sandbox, tests, and owner approval, based on pilot results. Editing of queries, reports, and handlers. |
 | Phase 4 | Re-import with diff, bulk permission tools, usage analytics |

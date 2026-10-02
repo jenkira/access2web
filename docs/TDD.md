@@ -103,7 +103,7 @@ Table 2 lists each component and its responsibility.
 | Windows worker pool | Export forms, reports, macros, and VBA source as text by using Access automation in a disposable environment |
 | Analyser and converter | Builds the application definition, migrates data, and produces the conversion report |
 | VBA pipeline | Classifies procedures, applies fixed mappings, and calls the translation service |
-| Review and publish service | Shows the conversion report and handler reviews, records approvals, and registers the application with the portal |
+| Review and publish service | Shows the conversion report and handler reviews, hosts the editor for drafts, records approvals, publishes versions, and registers the application with the portal |
 | Runtime API | Serves every published application, and applies permissions and audit logging |
 | Authorisation service | Resolves effective permissions for a user and an object |
 | Handler sandbox | Runs approved handlers with a restricted host interface |
@@ -314,7 +314,7 @@ A **grant** gives a **subject** a **permission level** on a **resource**. The de
 
 - A subject is a user, a directory group, or a role.
 - A resource is an application, or an object inside it: a table, a form, or a report.
-- A permission level is one of the six levels in the PRD.
+- A permission level is one of the seven levels in the PRD.
 
 ### Resolving permissions
 
@@ -370,16 +370,86 @@ The audit store has these properties:
 - Tables are partitioned by month, so queries and retention stay manageable.
 - Auditors read through a separate role, with search and export.
 
+## Application editing
+
+The definition model makes editing after migration a controlled change to a document, not a code change. An owner or designer edits a draft of the definition, and the system publishes the draft as a new immutable version.
+
+### Draft and version model
+
+The system holds these states for an application:
+
+- **Published versions.** Immutable. Exactly one is current. The runtime serves the current version.
+- **Draft.** Mutable. Each application has at most one active draft, which a designer locks while editing. Other designers can view the draft but not change it.
+
+A draft starts as a copy of the current version. The editor records each change as an operation (for example, "rename field `Price` to `UnitPrice`"), not only as a before-and-after difference. A difference cannot tell a rename from a drop followed by an add, and a rename must keep its data.
+
+### Edit surfaces
+
+The editor provides these surfaces, in this order of delivery:
+
+1. Forms: controls, labels, visibility, defaults, and validation rules.
+2. Data: tables, fields, types, and constraints.
+3. Queries and reports: columns, filters, grouping, and sorting. The editor offers a builder first, and a SQL view for experienced designers.
+4. Handlers: a code editor with the sandbox and test runner, under the approval rules in the VBA pipeline.
+
+The editor renders user-entered text, such as labels and messages, with escaping, so that an edit cannot inject script into other users' browsers.
+
+### Publishing a draft
+
+To publish a draft, the system:
+
+1. Validates the draft: the definition conforms to its schema, every control binds to an existing field, every query translates and runs, and every handler passes its tests.
+2. Computes the data changes from the recorded operations, and classifies each one as shown in Table 5.
+3. Runs a dry run on a copy of the affected tables for any destructive change, and shows the affected row counts to the owner.
+4. Requires owner confirmation of destructive changes, and takes a snapshot of the application's schema.
+5. Applies all data changes in one transaction. PostgreSQL supports transactional schema changes, so a failure leaves the schema unchanged.
+6. Creates the new immutable version, and makes it current in one atomic step.
+7. Writes an audit event with the difference, the person who published, and the snapshot reference.
+
+Table 5 lists the classes of data change and how each is handled.
+
+**Table 5. Classes of data change**
+
+| Class | Examples | Handling |
+|---|---|---|
+| Additive | Add a table, add a nullable field, add a control, add a rule | Apply automatically on publication |
+| Compatible | Widen a text field, rename a table or field, add a default | Apply after the owner reviews a preview. A rename keeps the data by renaming in place. |
+| Destructive | Drop a table or field, narrow a type, add a required constraint to a field that holds empty values, change a key | Require owner confirmation, a dry run, and a snapshot before applying |
+
+A change that rewrites a large table can lock it. The system runs such a change in a maintenance window that the owner chooses.
+
+### Rollback
+
+Rollback depends on the kind of change:
+
+- **Definition-only changes.** Making an earlier version current is instant.
+- **Additive changes.** The earlier version still runs, because the added tables and fields are ignored by that version.
+- **Renames and destructive changes.** The earlier version cannot run against the changed schema. The only route is to restore the snapshot, which loses every change to the data since the snapshot. The rollback screen must say so and require confirmation.
+
+### Open sessions during publication
+
+The runtime validates every request against the current version. When a user has a form open from an earlier version, the runtime returns a version-changed response, and the browser asks the user to reload. The runtime does not apply an old form's changes to a field that no longer exists.
+
+### Authorisation and audit
+
+The Design application level lets a person create and edit a draft. Only the Manage application level lets a person publish. A person with both levels can edit and publish their own draft unless the organisation requires a second approver, which is an open question in the [decisions log](DECISIONS.md). The audit store records draft creation, each published version, rollbacks, and snapshot use.
+
+### Relationship to re-import
+
+Re-import from the original `.accdb` file (FR-12) conflicts with editing, because the source file and the edited application diverge. The design proposes that the web application becomes the system of record after the first published edit. Re-import then stays available only for an application with no published edits. An owner who wants to re-import an edited application creates a separate application. This proposal needs the owner's decision (item O8).
+
 ## Platform data model
 
-Table 5 lists the main tables in the control database.
+Table 6 lists the main tables in the control database.
 
-**Table 5. Control database tables**
+**Table 6. Control database tables**
 
 | Table | Purpose | Key columns |
 |---|---|---|
 | `applications` | One row for each application | `id`, `slug`, `name`, `owner_id`, `current_version` |
-| `app_versions` | Immutable definitions | `app_id`, `version`, `definition`, `published_at` |
+| `app_versions` | Immutable published definitions | `app_id`, `version`, `definition`, `published_at`, `published_by` |
+| `app_drafts` | One mutable draft for each application | `app_id`, `base_version`, `operations`, `locked_by`, `updated_at` |
+| `schema_changes` | Data changes applied at publication | `app_id`, `to_version`, `class`, `migration`, `snapshot_ref`, `applied_at` |
 | `import_jobs` | Upload and conversion runs | `id`, `app_id`, `status`, `source_object_key` |
 | `conversion_items` | One row for each source object | `job_id`, `object_type`, `name`, `status`, `reason` |
 | `handlers` | Translated procedures | `app_id`, `procedure`, `class`, `source`, `generated`, `approved_by`, `approved_at` |
@@ -387,13 +457,13 @@ Table 5 lists the main tables in the control database.
 
 ## API outline
 
-Table 6 lists the main API groups.
+Table 7 lists the main API groups.
 
-**Table 6. API groups**
+**Table 7. API groups**
 
 | Group | Example operations | Caller |
 |---|---|---|
-| Authoring | Create an import job, get the conversion report, edit a definition, approve a handler, publish | Application owner |
+| Authoring | Create an import job, get the conversion report, create and edit a draft, compare versions, approve a handler, publish, roll back | Application owner, application designer |
 | Administration | Manage roles, view all applications, unpublish | Platform administrator |
 | Permissions | List, create, and delete grants | Application owner, platform administrator |
 | Runtime | Read, create, update, and delete records, run a query view, run a report, export | Application user |
@@ -403,9 +473,9 @@ Runtime routes use the form `/api/apps/{slug}/...`. Every response for a denied 
 
 ## Threats and mitigations
 
-Table 7 lists the main threats and how the design addresses them.
+Table 8 lists the main threats and how the design addresses them.
 
-**Table 7. Threats and mitigations**
+**Table 8. Threats and mitigations**
 
 | Threat | Mitigation |
 |---|---|
@@ -420,9 +490,9 @@ Table 7 lists the main threats and how the design addresses them.
 
 ## Non-functional design
 
-Table 8 shows how the design meets the PRD's non-functional requirements.
+Table 9 shows how the design meets the PRD's non-functional requirements.
 
-**Table 8. Non-functional requirements and design response**
+**Table 9. Non-functional requirements and design response**
 
 | Requirement | Design response |
 |---|---|
@@ -441,14 +511,14 @@ The test plan has these parts:
 - **Permission matrix tests.** Automated tests for each role, resource, and level, including the cases that must deny.
 - **Runtime component tests.** Each control and rule type has tests on its own.
 - **Sandbox escape tests.** A suite of hostile handlers that try to reach the network, file system, and other schemas.
-- **Load tests.** Run against the targets in Table 8.
+- **Load tests.** Run against the targets in Table 9.
 - **Security review.** A penetration test before the first production release.
 
 ## Delivery plan
 
-Work follows the phases in the PRD. Four spikes come first, because they test the assumptions that carry the most risk. The [spike plan](SPIKE-PLAN.md) gives the method for each. Table 9 lists them.
+Work follows the phases in the PRD. Four spikes come first, because they test the assumptions that carry the most risk. The [spike plan](SPIKE-PLAN.md) gives the method for each. Table 10 lists them.
 
-**Table 9. Spikes**
+**Table 10. Spikes**
 
 | Spike | Question | Pass condition |
 |---|---|---|
@@ -457,7 +527,7 @@ Work follows the phases in the PRD. Four spikes come first, because they test th
 | 3. Handler sandbox | Can a Wasm sandbox run realistic handlers within limits? | Hostile handlers fail safely, and normal handlers run within 100 ms |
 | 4. Local model | Can a locally hosted model translate VBA to approvable handlers? | At least 50% of translatable procedures pass their tests unedited, and no manual-redesign procedure receives a translation |
 
-The owner adopted the thresholds in Table 9 (decision D5) and can revise them before the spikes start.
+The owner adopted the thresholds in Table 10 (decision D5) and can revise them before the spikes start.
 
 ## Open questions
 
@@ -477,4 +547,7 @@ The [decisions log](DECISIONS.md) holds the open items, their owners, and the po
 - The runtime must support every control and rule type. A gap shows up as a conversion failure for owners, so the conversion corpus must cover the controls in use.
 - Jet SQL has many edge cases. Query translation could take longer than planned, and the fallback is to mark queries as not converted.
 - A local model might translate too few procedures well enough to be useful. Spike 4 measures this before the pipeline is built, and the fallback is to rely on fixed mappings, flag more procedures for manual redesign, or ask the data policy owner to approve a hosted service.
+- Editing makes every published application changeable, so a mistake or a malicious edit reaches users. Drafts, validation, the approval gate, the sandbox, and the audit trail reduce this risk, but a person with the Manage application level can still publish a bad change.
+- Rollback after a destructive change loses recent data. The rollback screen must state the loss before the owner confirms.
+- The editor must cover enough control and rule types that owners do not return to Access. A narrow editor in Phase 2 pushes owners to ask for changes from the platform team.
 - Owner review of handlers is a human bottleneck. If owners approve without reading, the safeguards fail, so the review screen must show test results and the original code, and the audit log must record every approval.
