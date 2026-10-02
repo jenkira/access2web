@@ -71,6 +71,14 @@ def create_app(portal: PortalAdapter | None = None) -> FastAPI:
         from fastapi.responses import JSONResponse
         return JSONResponse({"error": "version_changed", "current": exc.current}, status_code=409)
 
+    @app.exception_handler(runtime.FormRequired)
+    async def _form_required(_: Request, exc):
+        from fastapi.responses import JSONResponse
+        names = ", ".join(exc.forms)
+        return JSONResponse({"error": "form_required", "forms": exc.forms,
+                             "detail": f"Records in this table are saved through a form, so that its rules apply. Use: {names}."},
+                            status_code=409)
+
     @app.exception_handler(runtime.Unprocessable)
     async def _unprocessable(_: Request, exc):
         from fastapi.responses import JSONResponse

@@ -189,9 +189,25 @@ A save that passes goes through the same audited write as any other, so the audi
 
 Publish refuses a form that cannot work, so a rule that cannot run is never stored. `validate_forms` in `backend/a2w/formrules.py` checks that every control is bound to a field that exists, that every expression parses and names only fields of the form's entity, that every rule has a message, and that combo boxes, subforms, and control ids are valid. The TypeScript editor has the same check, and `spec/expression/validation.json` holds the cases that both must agree on.
 
-### A limit
+### Saving through a form is required
 
-The rules apply to a save through a form. The table routes do not apply them. A person with edit data on a table can write the same record through `POST /api/apps/{slug}/tables/{table}/records` and the rule is not checked. A test records this. The owner has to decide whether to accept it, to require saves through a form, or to attach rules to the entity.
+A table that has a form is written through the form. The table routes refuse to create or update a record in such a table, so a person cannot skip the rules by calling `POST` or `PUT` on `/api/apps/{slug}/tables/{table}/records`. The answer is 409 with `form_required` and the names of the forms. The permission check runs first, so a person without edit data gets the usual refusal and learns nothing about forms.
+
+Table 6 shows what the rule covers.
+
+**Table 6. Which routes the rule covers**
+
+| Route | Table has a form | Table has no form |
+|---|---|---|
+| Create or update through the table routes | Refused with `form_required` | Allowed, with edit data |
+| Create or update through a form | Checked against the rules | Not applicable |
+| Read | Allowed, with view data | Allowed, with view data |
+| Delete | Allowed, with delete data | Allowed, with delete data |
+
+Two consequences to know about:
+
+- **Edit data on the table is not enough.** A grant on the table replaces application grants for that table, but a form is a separate object. A person needs edit data on the form, which an application-level grant gives. A grant on the table alone lets the person read and delete, and no longer lets them write.
+- **Delete is not covered.** A delete cannot leave a record that breaks a rule, and there is no form route for it.
 
 ## Changing the language
 

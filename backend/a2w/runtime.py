@@ -31,6 +31,14 @@ class VersionChanged(Exception):
         self.current = current
 
 
+class FormRequired(Exception):
+    """The table has a form, so records in it are saved through a form, where the form's rules apply."""
+
+    def __init__(self, table: str, forms: list[str]) -> None:
+        super().__init__(f"{table} is saved through a form")
+        self.table, self.forms = table, forms
+
+
 class Unprocessable(Exception):
     """The record breaks a form rule, or holds a field the form does not have. The payload is the response body."""
 
@@ -127,10 +135,22 @@ def _update(conn, slug: str, e: Entity, key: str, values: dict) -> dict:
     return row
 
 
+def _require_no_form(d: Definition, table: str) -> None:
+    """A table that has a form is written through a form, so that its rules cannot be skipped.
+
+    This applies to create and update. Reads are not affected. Delete is not affected, because a delete cannot leave a
+    record that breaks a rule, and there is no form route for it.
+    """
+    forms = [f["name"] for f in d.forms if f.get("entity") == table]
+    if forms:
+        raise FormRequired(table, forms)
+
+
 def create_record(conn, slug, ident, table, values) -> dict:
     app, d = load_app(conn, slug)
     e = _entity(d, table)
-    _require(conn, app, ident, table, "edit_data")
+    _require(conn, app, ident, table, "edit_data")  # permission first, so a person without it learns nothing about forms
+    _require_no_form(d, table)
     values = _clean(e, values)
     _scope(conn, app, ident)
     return _insert(conn, slug, e, values)
@@ -140,6 +160,7 @@ def update_record(conn, slug, ident, table, key, values) -> dict:
     app, d = load_app(conn, slug)
     e = _entity(d, table)
     _require(conn, app, ident, table, "edit_data")
+    _require_no_form(d, table)
     values = _clean(e, values, for_update=True)
     _scope(conn, app, ident)
     return _update(conn, slug, e, key, values)
@@ -170,7 +191,8 @@ def save_form(conn, slug, ident, form_name, values, *, version: int, key: str | 
     3. The record holds only fields that the form binds.
     4. Every rule on a visible control is true, and every visible required field has a value.
 
-    The form's rules apply to a save through the form. The table routes do not apply them.
+    The form's rules apply to every save through the form. The table routes refuse to create or update a record in a table
+    that has a form, so there is no way around the rules.
     """
     app, d = load_app(conn, slug)
     form = _form(d, form_name)

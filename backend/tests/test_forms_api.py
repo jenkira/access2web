@@ -209,12 +209,63 @@ def test_the_form_list_shows_only_forms_the_user_may_view(client):
     assert client.get(f"/api/apps/{slug}/forms/CustomerForm", headers=hdr("gus")).status_code == 403
 
 
-# ---- a limit, written down as a test so nobody is surprised by it
-def test_known_limit_the_table_routes_do_not_apply_form_rules(client):
-    """Form rules apply to a save through the form. A user with table-level edit_data can write the same record through the
-    table route, and the rule is not checked. The owner has to decide whether to accept this, or to require saves through a form."""
+# ---- saves must go through a form
+def test_a_table_with_a_form_cannot_be_created_in_or_updated_through_the_table_routes(client):
     slug, _ = publish(client)
-    via_form = save(client, slug, "CustomerForm", {"customer_name": "Zed", "email": "ab"})
-    assert via_form.status_code == 422
-    via_table = client.post(f"/api/apps/{slug}/tables/customers/records", headers=CARA, json={"customer_name": "Zed", "email": "ab"})
-    assert via_table.status_code == 201
+    created = client.post(f"/api/apps/{slug}/tables/customers/records", headers=CARA, json={"customer_name": "Zed", "email": "ab"})
+    assert created.status_code == 409
+    assert created.json()["error"] == "form_required" and created.json()["forms"] == ["CustomerForm"]
+    assert "CustomerForm" in created.json()["detail"], "the message says where to go"
+    updated = client.put(f"/api/apps/{slug}/tables/customers/records/1", headers=CARA, json={"email": "ab"})
+    assert updated.status_code == 409 and updated.json()["error"] == "form_required"
+    names = [x["customer_name"] for x in client.get(f"/api/apps/{slug}/tables/customers/records", headers=BOB).json()["records"]]
+    assert "Zed" not in names and "Acme" in names, "nothing was written"
+    # the same record through the form is checked
+    assert save(client, slug, "CustomerForm", {"customer_name": "Zed", "email": "ab"}).status_code == 422
+
+
+def test_a_table_without_a_form_is_still_written_through_the_table_routes(client):
+    slug, _ = publish(client, forms=[CUSTOMER_FORM])  # no form for orders
+    r = client.post(f"/api/apps/{slug}/tables/orders/records", headers=CARA, json={"customerid": 1, "total": 5})
+    assert r.status_code == 201
+    assert client.put(f"/api/apps/{slug}/tables/orders/records/{r.json()['orderid']}", headers=CARA, json={"total": 6}).status_code == 200
+
+
+def test_an_application_with_no_forms_behaves_as_before(client):
+    slug, _ = publish(client, forms=[])
+    assert client.post(f"/api/apps/{slug}/tables/customers/records", headers=CARA, json={"customer_name": "Zed"}).status_code == 201
+
+
+def test_reads_and_deletes_are_not_affected(client):
+    slug, _ = publish(client, grants=[*BASE_GRANTS, grant("dee", "delete_data"), grant("dee", "view_data")])
+    dee = hdr("dee")
+    made = save(client, slug, "CustomerForm", {"customer_name": "Gone"}).json()
+    assert client.get(f"/api/apps/{slug}/tables/customers/records/{made['customerid']}", headers=BOB).status_code == 200
+    assert client.delete(f"/api/apps/{slug}/tables/customers/records/{made['customerid']}", headers=dee).status_code == 204
+
+
+def test_a_person_without_edit_data_gets_the_plain_refusal_and_learns_nothing_about_forms(client):
+    slug, _ = publish(client)
+    for who in (BOB, EVE):
+        r = client.post(f"/api/apps/{slug}/tables/customers/records", headers=who, json={"customer_name": "x"})
+        assert r.status_code == 403 and "form" not in json_text(r), f"{who}: {r.text}"
+
+
+def json_text(r) -> str:
+    return r.text.lower()
+
+
+def test_every_form_on_the_table_is_named(client):
+    second = {**CUSTOMER_FORM, "name": "CustomerQuickForm", "title": "Quick add"}
+    slug, r = publish(client, forms=[CUSTOMER_FORM, second])
+    assert r.status_code == 200, r.text
+    res = client.post(f"/api/apps/{slug}/tables/customers/records", headers=CARA, json={"customer_name": "x"})
+    assert res.status_code == 409 and res.json()["forms"] == ["CustomerForm", "CustomerQuickForm"]
+
+
+def test_a_person_with_only_table_edit_data_and_no_form_access_cannot_write(client):
+    """Edit data on the table is not enough once the table has a form. The person needs edit data on the form, which an
+    application-level grant gives. A grant on the table alone does not."""
+    slug, _ = publish(client, grants=[grant("tim", "edit_data", "table", "customers")])
+    assert client.post(f"/api/apps/{slug}/tables/customers/records", headers=hdr("tim"), json={"customer_name": "x"}).status_code == 409
+    assert save(client, slug, "CustomerForm", {"customer_name": "x"}, who=hdr("tim")).status_code == 403
