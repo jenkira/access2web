@@ -207,30 +207,44 @@ test("an open form from the earlier version is told to reload after a publish", 
   assert.equal(await page.locator('label[for="ctl-CustomerForm-c_name"]').innerText(), "Client");
 });
 
-test("an edit and an entity rename are saved to the server by themselves, and the draft comes back after a reload", async () => {
+test("an edit, a field rename and an entity rename are saved to the server by themselves, and the draft comes back after a reload", async () => {
   const slug = await newApp();
   const page = await open(editor(slug, "dana"));
   await page.waitForSelector("form");
   const saved = () => page.waitForFunction(() => { const s = (window as any).__spike5.saver; return s.state === "saved" && !s.dirty; });
   const entities = () => page.locator('[data-fk="en-entity"] option').allInnerTexts();
+  const fields = () => page.locator('[data-fk="rn-field"] option').allInnerTexts();
+  const panel = () => page.locator('label[for="rn-field"]').innerText();
   const label = () => page.locator('label[for="ctl-CustomerForm-c_name"]').innerText();
+  const emailBind = () => page.evaluate(() => (window as any).__spike5.editor.history.current.forms[0].rows[1].controls[0].bind);
   assert.equal((await draftOf(slug, "dana")).draft.log.length, 0, "the lock was taken when the page opened");
   await setLabel(page, "c_name", "Full name");
+  await page.selectOption("#rn-field", "email"); await page.fill("#rn-to", "mail");
+  await page.click('[data-fk="rn-preview"]'); await page.click('[data-fk="rn-apply"]');
   await page.fill("#en-to", "clients"); await page.click('[data-fk="en-preview"]'); await page.click('[data-fk="en-apply"]');
   await saved();
   const draft = (await draftOf(slug, "dana")).draft;
   assert.equal(draft.mine, true);
-  assert.deepEqual(draft.log.map((o: any) => o.t === "setLabel" ? ["setLabel", o.id, o.label] : [o.t, o.from, o.to]), [["setLabel", "c_name", "Full name"], ["renameEntity", "customers", "clients"]]);
+  assert.deepEqual(draft.log.map((o: any) => o.t === "setLabel" ? ["setLabel", o.id, o.label] : o.t === "renameField" ? [o.t, `${o.entity}.${o.from}`, o.to] : [o.t, o.from, o.to]),
+    [["setLabel", "c_name", "Full name"], ["renameField", "customers.email", "mail"], ["renameEntity", "customers", "clients"]], "the field rename names the entity as it was then");
   const live = (await api("GET", `/api/apps/${slug}/definition`, who("olive"))).body;
-  assert.equal(live.version, 1, "nothing was published"); assert.equal(live.entities[0].name, "customers", "and the table is not renamed until it is");
+  assert.equal(live.version, 1, "nothing was published");
+  assert.equal(live.entities[0].name, "customers", "and the table is not renamed until it is");
+  assert.ok(live.entities[0].fields.some((f: any) => f.name === "email"), "nor the column");
 
   await page.reload(); await page.waitForSelector("form");
-  assert.match(await statusText(page, /Resumed/), /Resumed your saved draft with 2 edits/);
+  assert.match(await statusText(page, /Resumed/), /Resumed your saved draft with 3 edits/);
   assert.equal(await label(), "Full name"); assert.ok((await entities()).includes("clients") && !(await entities()).includes("customers"));
+  assert.ok((await fields()).includes("mail") && !(await fields()).includes("email"));
+  assert.equal(await panel(), "Field of clients"); assert.equal(await emailBind(), "mail", "the control follows the field");
   assert.equal(await page.evaluate(() => (window as any).__spike5.editor.history.current.forms[0].entity), "clients", "the form follows the entity");
 
-  await page.click('[data-fk="undo"]');  // the resumed rename can be undone like any other edit, and the label stays
-  assert.ok((await entities()).includes("customers")); assert.equal(await label(), "Full name");
+  await page.click('[data-fk="undo"]');  // each resumed edit can be undone like any other, newest first
+  assert.ok((await entities()).includes("customers")); assert.equal(await panel(), "Field of customers");
+  assert.ok((await fields()).includes("mail"), "the field rename is still in place"); assert.equal(await label(), "Full name");
+  await page.click('[data-fk="undo"]');
+  assert.ok((await fields()).includes("email") && !(await fields()).includes("mail")); assert.equal(await emailBind(), "email");
+  assert.equal(await label(), "Full name", "the label edit is still in place");
   await page.click('[data-fk="undo"]');
   assert.equal(await label(), "Name");
   await saved();
