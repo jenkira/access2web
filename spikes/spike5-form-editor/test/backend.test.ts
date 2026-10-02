@@ -304,14 +304,40 @@ test("a second designer is told who holds the draft and cannot take it, but a ma
   assert.ok(live.version === 1 && live.entities[0].fields.some((f: any) => f.name === "email"), "none of it reached the application");
 });
 
-test("a lock that has lapsed can be taken by another designer", async () => {
+test("a lock that has lapsed can be taken by another designer, and the lapsed designer's field rename goes with it", async () => {
   const slug = await newApp();
+  const renameField = async (page: Page, from: string, to: string) => { await page.selectOption("#rn-field", from); await page.fill("#rn-to", to); await page.click('[data-fk="rn-preview"]'); await page.click('[data-fk="rn-apply"]'); };
+  const fields = (page: Page) => page.locator('[data-fk="rn-field"] option').allInnerTexts();
+  const saved = (page: Page) => page.waitForFunction(() => { const s = (window as any).__spike5.saver; return s.state === "saved" && !s.dirty; });
   const dana = await open(editor(slug, "dana"));
   await dana.waitForSelector("form");
+  await renameField(dana, "email", "mail");
+  await saved(dana);
+  assert.deepEqual((await draftOf(slug, "dana")).draft.log.map((o: any) => [o.t, o.from, o.to]), [["renameField", "email", "mail"]]);
+
   await lapse(slug);
   const dan = await open(editor(slug, "dan"));
   await dan.waitForSelector("form");
-  assert.equal((await draftOf(slug, "dan")).draft.locked_by, "dan");
+  const taken = (await draftOf(slug, "dan")).draft;
+  assert.equal(taken.locked_by, "dan");
+  assert.equal(taken.log.length, 0, "dana's rename is not in the draft that dan took");
+  assert.ok((await fields(dan)).includes("email") && !(await fields(dan)).includes("mail"), "dan sees the published field name");
+  assert.deepEqual(await dan.locator("#status").innerText(), "", "nothing was resumed");
+
+  // The lapsed designer finds out at the next save, and cannot overwrite dan's draft.
+  await renameField(dana, "customer_name", "title");
+  await draftState(dana, /dan has taken over/);
+  assert.equal((await draftOf(slug, "dan")).draft.log.length, 0, "dana's late rename did not reach dan's draft");
+
+  // Dan's own field rename goes into the draft that he holds.
+  await renameField(dan, "email", "contact");
+  await saved(dan);
+  assert.deepEqual((await draftOf(slug, "dan")).draft.log.map((o: any) => [o.t, o.from, o.to]), [["renameField", "email", "contact"]]);
+
+  const events = (await api("GET", `/api/audit?app=${slug}`, who("aud", "auditor"))).body as any[];
+  assert.ok(events.some((e) => e.action === "draft_taken_over" && e.actor === "dan" && e.detail.from === "dana"), "the takeover is in the audit log");
+  const live = (await api("GET", `/api/apps/${slug}/definition`, who("olive"))).body;
+  assert.ok(live.version === 1 && live.entities[0].fields.some((f: any) => f.name === "email"), "no rename reached the application");
 });
 
 test("the page keeps the lock while it is open", async () => {
