@@ -112,17 +112,56 @@ Table 2 lists the answers the route gives.
 
 Every request now takes a share lock on the application's row for the length of its transaction. A new version takes the row for update, so it waits for requests in flight, and a request that starts during the change waits and reads the new version. This stops a request from running with a definition that does not match the tables.
 
+## Edit forms in the browser
+
+The Spike 5 form editor can edit and publish a form of a published application, and run it. The backend serves the editor when `A2W_EDITOR_DIR` names the editor's folder.
+
+To try it:
+
+1. Build the editor:
+
+   ```sh
+   (cd spikes/spike5-form-editor && npm install && npm run build)
+   ```
+
+2. Start the API with the editor folder set:
+
+   ```sh
+   export A2W_EDITOR_DIR=$PWD/spikes/spike5-form-editor
+   ```
+
+   Then start the API as in "Run the application for development".
+
+3. Open the editor at `/editor/public/index.html?app=<slug>&mode=edit&form=<form>&user=<user>`. Use `mode=run` to fill in the form. With `A2W_DEV_AUTH=1`, the page signs in as `user`, and as `groups` and `roles` if you pass them.
+
+Table 3 shows what the page asks of the backend.
+
+**Table 3. Routes the editor uses**
+
+| Page | Route | Needs |
+|---|---|---|
+| Edit | `GET /api/apps/{slug}/definition` | Design application |
+| Edit, Publish | `POST /api/apps/{slug}/versions` | Manage application |
+| Run | `GET /api/apps/{slug}/forms/{form}` | View data on the form |
+| Run, Save | `POST /api/apps/{slug}/forms/{form}/records` | Edit data on the form |
+| Run, combo boxes and subforms | `GET /api/apps/{slug}/tables/{table}/records` | View data on the table |
+
+The backend decides every permission. The page shows what it is told, so a person who may not publish sees the refusal as a message. After a publish, the page starts again from the new version. A draft that started from an older version is refused, with the version it needs to reload.
+
+Without `app=` in the address, the page uses the prototype's own server, as in the Spike 5 report.
+
 ## Configuration
 
-Table 3 lists the environment variables.
+Table 4 lists the environment variables.
 
-**Table 3. Environment variables**
+**Table 4. Environment variables**
 
 | Variable | Purpose |
 |---|---|
 | `A2W_DATABASE_URL` | Connection string for PostgreSQL. The user needs `CREATEROLE` and `CREATE` on the database. |
 | `A2W_DEV_AUTH` | Set to `1` to trust identity headers. Development only. |
 | `A2W_WEB_DIR` | Directory of the built front end. When set, the API serves it. |
+| `A2W_EDITOR_DIR` | The form editor's folder, `spikes/spike5-form-editor`, with `npm run build` done. When set, the API serves the editor under `/editor/`. |
 
 ## How it works
 
@@ -138,7 +177,9 @@ Table 3 lists the environment variables.
 - A table without a single-column primary key can be listed and created in, but not edited or deleted from.
 - A table that has a form can be created in and updated only through the form, so edit data on the table alone no longer lets a person write. Deleting is not affected. Editing a form after publish is not built.
 - A new version carries renames and form changes only. Adding or removing a field, an entity, or a relationship needs a design that handles existing data, and is not built.
-- The editor does not send its operations to the backend yet. The route exists, and the tests call it directly.
+- The form editor keeps its draft in the browser. There is no saved draft or lock on the server, so a reload drops unpublished edits (the page asks before it unloads), and two designers can edit at once. The first to publish wins, and the second gets 409 `version_changed`.
+- The editor page can rename a field but not an entity. The route accepts both, and the editor refuses to send an entity rename that would give the table another name, because the backend names a table after its entity.
+- The editor is a prototype from Spike 5. Its page does not use the portal's styling or sign-in.
 - After an entity rename, earlier audit events keep the old table name, because the log is append-only. New events use the new name.
 - A new version briefly blocks new requests to the application while it renames. A busy application can make the publish wait, and then fail with 409.
 - Audit tables are not partitioned by month yet.

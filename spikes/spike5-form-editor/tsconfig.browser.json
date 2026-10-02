@@ -9,5 +9,5 @@
     "declaration": false,
     "types": []
   },
-  "include": ["src/model", "src/ui", "fixtures/demo.ts"]
+  "include": ["src/model", "src/ui", "src/backend", "fixtures/demo.ts"]
 }

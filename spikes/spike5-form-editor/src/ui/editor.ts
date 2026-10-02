@@ -11,10 +11,11 @@ import { type Lookups, renderForm } from "./render.ts";
 
 const ADDABLE = ["text", "number", "date", "checkbox", "textarea"] as const;
 
-export interface EditorHooks { saveDraft?(log: Op[]): Promise<string>; publish?(): Promise<string> }
+/** `publish` gets the log up to the pointer and the draft it builds, for a server that takes the result and not the log. */
+export interface EditorHooks { saveDraft?(log: Op[]): Promise<string>; publish?(ctx: { log: Op[]; definition: Definition }): Promise<string> }
 
 export class Editor {
-  readonly history: History;
+  history: History;
   form: string;
   selected: string | null = null;
   private status = "";
@@ -120,6 +121,18 @@ export class Editor {
     this.tryDo({ t: "moveControl", form: this.form, id: srcId, place: { row: rowIdx }, index: Math.max(0, index) }, `Moved ${srcId}.`);
   }
 
+  /** Start again from a definition, for example after a publish. The log, the undo history, and the selection are cleared. */
+  rebase(def: Definition, message = ""): void {
+    this.history = new History(def);
+    this.selected = null; this.renamePreview = null; this.renameDraft = { field: "", to: "" };
+    if (!def.forms.some((f) => f.name === this.form)) this.form = def.forms[0]!.name;
+    if (message) this.say(message);
+    this.render();
+  }
+
+  /** Edits that no publish has carried to the server. */
+  get unpublishedEdits(): number { return this.history.log.length; }
+
   /** Save the current log to the server before publishing, so Publish always publishes what is on screen. */
   async hooks_saveForPublish(): Promise<void> { await this.hooks.saveDraft?.(this.history.log); }
 
@@ -217,7 +230,7 @@ export class Editor {
     const draft = h("section", { class: "panel", "aria-labelledby": "draft-h" }, h("h2", { id: "draft-h" }, "Draft"),
       h("p", {}, `Edits in the log: ${this.history.log.length}`), warnList,
       btn("save", "Save draft", async () => { if (!this.hooks.saveDraft) return; try { this.say(await this.hooks.saveDraft(this.history.log)); } catch (e) { this.say((e as Error).message, "alert"); } this.render(); }, !!this.hooks.saveDraft),
-      btn("publish", "Publish", async () => { if (!this.hooks.publish) return; try { this.say(await this.hooks.publish()); } catch (e) { this.say((e as Error).message, "alert"); } this.render(); }, !!this.hooks.publish));
+      btn("publish", "Publish", async () => { if (!this.hooks.publish) return; try { this.say(await this.hooks.publish({ log: this.history.log, definition: this.history.current })); } catch (e) { this.say((e as Error).message, "alert"); } this.render(); }, !!this.hooks.publish));
 
     const status = h("div", { id: "status", role: this.statusKind, "aria-live": this.statusKind === "alert" ? "assertive" : "polite" }, this.status);
 

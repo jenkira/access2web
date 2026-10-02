@@ -29,7 +29,7 @@ The spike changes the design in four ways:
 1. **The expression language needs a server implementation, and now has one.** The server must check the same rules, and Phase 1's backend is Python. I wrote a Python evaluator and a written specification ([docs/EXPRESSIONS.md](../EXPRESSIONS.md)). Both evaluators pass the same 285 conformance cases, and agreed on 150,000 random expressions.
 2. **Build the editor, and do not adopt one.** One candidate has a commercial licence and cannot be used without a purchase. The closest open candidate may need code in its conditions, which the design forbids, but I could not verify that. This is a judgement, and I did not test it.
 3. **Edit by property panel first, and add drag and drop as an extra.** Every move works from buttons. Drag and drop works too, but it is the only part a keyboard cannot reach without the buttons.
-4. **A rename is safe to undo only before publish.** The data change is meant to run at publish, so an undo before then costs nothing. After publish, the design already says that a rename needs a snapshot restore. The backend now carries a rename to the data when it publishes a new version (`publish.republish`, described in the README). The prototype's own server still does not run it, and the editor does not send its operations to the backend yet.
+4. **A rename is safe to undo only before publish.** The data change is meant to run at publish, so an undo before then costs nothing. After publish, the design already says that a rename needs a snapshot restore. The backend now carries a rename to the data when it publishes a new version (`publish.republish`, described in the README). The prototype's own server still does not run it. The editor can now publish to the backend instead: open it with `?app=<slug>` (see "Edit forms in the browser" in the README).
 
 ## Question
 
@@ -88,7 +88,7 @@ A field rename does four things:
 1. It changes the entity, and every control, rule, combo box, and subform that refers to the field.
 2. It rewrites each saved query. The rewriter reads the query text as tokens, tracks table aliases, and renames only the column of the right table. When a bare column was a result name, the rewriter adds an alias with the old name, so that nothing downstream changes.
 3. It lists each handler that mentions the old name, with the line numbers.
-4. It generates the SQL for the data change, `alter table ... rename column`. The design applies the change at publish. In this prototype, the tests apply it directly, and the prototype server's publish step does not run it. The backend does: `POST /api/apps/{slug}/versions` takes the rename as an operation, builds the same statement itself, and applies it with the new version in one transaction. The backend does not store queries yet, so the query rewrite and the handler list have no counterpart there.
+4. It generates the SQL for the data change, `alter table ... rename column`. The design applies the change at publish. In this prototype, the tests apply it directly, and the prototype server's publish step does not run it. The backend does: `POST /api/apps/{slug}/versions` takes the rename as an operation, builds the same statement itself, and applies it with the new version in one transaction. The editor sends the renames from its log and the forms whole, and the backend checks the forms against the renamed entities. The backend does not store queries yet, so the query rewrite and the handler list have no counterpart there.
 
 A query that the rewriter cannot place with certainty is listed for review. It is never guessed.
 
@@ -316,10 +316,11 @@ All spike code is in `spikes/spike5-form-editor/`. It is prototype code and must
 | Path | Contents |
 |---|---|
 | `src/model/` | Types, the expression language, operations, history, rename, and the SQL rewriter |
+| `src/backend/` | The adapter between the editor's definition and the backend's, and the client for the backend's routes |
 | `src/ui/` | Renderer, editor, and page entry point |
 | `src/server/` | Draft workflow, permissions, and the session server |
 | `fixtures/` | Five synthetic forms, queries, and sample data |
-| `test/` | 112 tests: expressions, the shared vectors, the rule lint, operations, a randomised log test, rename against PostgreSQL, the workflow, and Chromium |
+| `test/` | 163 tests: expressions, the shared vectors, the rule lint, operations, a randomised log test, rename against PostgreSQL, the workflow, Chromium, and the editor against the real backend |
 | `tools/` | A batch evaluator for the differential test, and the script that writes the form vectors |
 | `../../backend/a2w/expr.py`, `formrules.py` | The Python evaluator and the server-side form checker |
 | `../../spec/expression/` | The shared conformance cases |

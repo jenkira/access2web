@@ -183,7 +183,19 @@ def get_form(conn, slug, ident, form_name) -> dict:
     form = _form(d, form_name)
     if not authz.can(conn, app["id"], ident, "form", form_name, "view_data"):
         raise Denied()
-    return {"version": app["current_version"], "form": form}
+    entity = _entity(d, form["entity"]).model_dump(mode="json", include={"name", "primary_key", "fields"})
+    # The entity comes with the form so that the browser can tell which fields are required and which are keys.
+    return {"version": app["current_version"], "form": form, "entity": entity}
+
+
+def get_definition(conn, slug, ident) -> dict:
+    """The whole definition, for the form editor. Needs design_application, which manage_application covers."""
+    app, d = load_app(conn, slug)
+    if not (ident.is_admin or authz.can(conn, app["id"], ident, "application", "", "design_application")):
+        raise Denied()
+    return {"version": app["current_version"],
+            "entities": [e.model_dump(mode="json", include={"name", "primary_key", "fields"}) for e in d.entities],
+            "forms": d.forms}
 
 
 def save_form(conn, slug, ident, form_name, values, *, version: int, key: str | None = None) -> dict:

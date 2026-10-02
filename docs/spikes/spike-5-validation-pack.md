@@ -34,6 +34,12 @@ Table 1 lists the three sign-ins.
 
 Use `dana` for the usability session, and `mia` to show publishing afterwards.
 
+### Run it against the backend
+
+To run the session on a real application instead of the synthetic forms, publish an application to the backend and open the editor from it. The steps are in "Edit forms in the browser" in the README. The sign-ins in Table 1 do not apply there: the backend uses the grants you give each user. Give the participant design application, and give yourself manage application, so that you can publish.
+
+Two differences matter for the session. The forms are the real forms of that application, so the task cards in Table 4 need new field names. A reload drops unpublished edits, because the backend keeps no saved draft yet.
+
 ### Know the limits
 
 - The forms are synthetic. They are not your Access forms. Replace them with the real forms from Spike 1 before the owner rates fidelity.

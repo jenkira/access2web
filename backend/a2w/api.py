@@ -236,6 +236,11 @@ def create_app(portal: PortalAdapter | None = None) -> FastAPI:
                     "entities": [e.model_dump(mode="json", include={"name", "source_name", "fields", "primary_key"})
                                  for e in d.entities if e.name in tables]}
 
+    @app.get("/api/apps/{slug}/definition")
+    def get_definition(slug: str, ident: Identity = Depends(identity)):
+        with db.transaction() as conn:
+            return runtime.get_definition(conn, slug, ident)
+
     @app.get("/api/apps/{slug}/forms/{form}")
     def get_form(slug: str, form: str, ident: Identity = Depends(identity)):
         with db.transaction() as conn:
@@ -294,6 +299,13 @@ def create_app(portal: PortalAdapter | None = None) -> FastAPI:
         with db.transaction() as conn:
             bad = conn.execute("select a2w_control.audit_verify() as bad").fetchone()["bad"]
         return {"intact": bad is None, "first_bad_seq": bad}
+
+    editor_dir = os.environ.get("A2W_EDITOR_DIR")  # the form editor: its page and its compiled script, nothing else
+    if editor_dir and os.path.isdir(editor_dir):
+        from fastapi.staticfiles import StaticFiles
+        for part in ("public", "dist"):
+            if os.path.isdir(os.path.join(editor_dir, part)):
+                app.mount(f"/editor/{part}", StaticFiles(directory=os.path.join(editor_dir, part)), name=f"editor-{part}")
 
     web_dir = os.environ.get("A2W_WEB_DIR")
     if web_dir and os.path.isdir(web_dir):
