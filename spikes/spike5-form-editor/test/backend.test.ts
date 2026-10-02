@@ -358,21 +358,50 @@ test("the page keeps the lock while it is open, and the heartbeat keeps a field 
   await page.waitForFunction(() => (window as any).__spike5.saver.state === "saved");  // the heartbeat does not leave the page in an error state
 });
 
-test("publishing ends the draft, and the page starts the next one from the new version", async () => {
+test("publishing ends the draft with its field rename, and the page starts the next draft from the new version", async () => {
   const slug = await newApp();
   const page = await open(editor(slug, "olive"));
   await page.waitForSelector("form");
+  const saved = () => page.waitForFunction(() => { const s = (window as any).__spike5.saver; return s.state === "saved" && !s.dirty; });
+  const fields = () => page.locator('[data-fk="rn-field"] option').allInnerTexts();
+  const renameField = async (from: string, to: string) => { await page.selectOption("#rn-field", from); await page.fill("#rn-to", to); await page.click('[data-fk="rn-preview"]'); await page.click('[data-fk="rn-apply"]'); };
+  const columns = async () => (await db.query("select column_name from information_schema.columns where table_schema = $1 and table_name = 'customers'", ["app_" + slug])).rows.map((r) => r.column_name);
   await setLabel(page, "c_name", "Published name");
+  await renameField("email", "mail");
+  await saved();
+  assert.deepEqual((await draftOf(slug, "olive")).draft.log.map((o: any) => o.t), ["setLabel", "renameField"]);
   await page.click('[data-fk="publish"]');
   await statusText(page, /Published as version 2/);
+
+  // Version 2 has both edits, and the draft that held them is gone.
+  const v2 = (await api("GET", `/api/apps/${slug}/definition`, who("olive"))).body;
+  assert.equal(v2.version, 2); assert.equal(v2.forms[0].rows[0].controls[0].label, "Published name"); assert.equal(v2.forms[0].rows[1].controls[0].bind, "mail");
+  const cols = await columns();
+  assert.ok(cols.includes("mail") && !cols.includes("email"), cols.join(","));
+  assert.equal((await db.query(`select mail from "app_${slug}".customers order by customerid limit 1`)).rows[0].mail, "a@x.test", "the data came with the column");
   const next = (await draftOf(slug, "olive")).draft;
-  assert.equal(next.mine, true); assert.equal(next.base_version, 2); assert.equal(next.log.length, 0);
-  // Nobody else can publish over the new draft, and an edit goes into it.
-  await setLabel(page, "c_name", "Second name");
-  await draftState(page, /Draft saved/);
-  assert.equal((await draftOf(slug, "olive")).draft.log[0].label, "Second name");
+  assert.equal(next.mine, true); assert.equal(next.base_version, 2); assert.equal(next.log.length, 0, "the next draft is empty, and does not repeat the rename");
+  assert.ok((await fields()).includes("mail") && !(await fields()).includes("email"), "the page starts from the published field name");
+
+  // Nobody else can publish over the new draft, and an edit goes into it. The rename starts from the new name.
+  await renameField("mail", "contact");
+  await saved();
+  assert.deepEqual((await draftOf(slug, "olive")).draft.log.map((o: any) => [o.t, o.from, o.to]), [["renameField", "mail", "contact"]]);
   const forms = structuredClone(FORMS);
   assert.equal((await api("POST", `/api/apps/${slug}/versions`, who("mia"), { base_version: 2, forms })).status, 409);
+
+  // Publishing that draft carries the second rename on from the first.
+  await page.click('[data-fk="publish"]');
+  await statusText(page, /Published as version 3/);
+  const after = await columns();
+  assert.ok(after.includes("contact") && !after.includes("mail") && !after.includes("email"), after.join(","));
+  assert.equal((await db.query(`select contact from "app_${slug}".customers order by customerid limit 1`)).rows[0].contact, "a@x.test", "still the same data");
+  const v3 = (await api("GET", `/api/apps/${slug}/definition`, who("olive"))).body;
+  assert.equal(v3.version, 3); assert.equal(v3.forms[0].rows[1].controls[0].bind, "contact");
+  assert.match(v3.forms[0].rows[1].controls[0].validate[0].expr, /^isnull\(contact\)/, "the rule follows the field through both renames");
+  const events = (await api("GET", `/api/audit?app=${slug}`, who("aud", "auditor"))).body as any[];
+  const published = events.filter((e) => e.action === "publish").map((e) => e.detail.renames);
+  assert.deepEqual(published.slice(0, 2), [[{ kind: "field", entity: "customers", from: "mail", to: "contact" }], [{ kind: "field", entity: "customers", from: "email", to: "mail" }]], "each version's renames are in the audit log, newest first");
 });
 
 test("Discard draft throws the edits, including a field rename, away after a confirmation", async () => {
