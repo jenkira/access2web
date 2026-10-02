@@ -279,6 +279,40 @@ test("rename in the UI lists what changes and which handlers need review", async
   assert.equal(await page.locator("#rn-to").inputValue(), "x");
 });
 
+test("a field rename and an entity rename undo and redo in order, and the field panel follows each step", async () => {
+  const page = await open("/public/index.html?mode=edit&form=OrderLineForm&user=dana");
+  await page.waitForSelector("form");
+  const fields = () => page.locator('[data-fk="rn-field"] option').allInnerTexts();
+  const panel = () => page.locator('label[for="rn-field"]').innerText();
+  const ops = async () => (await log(page)).map((o: any) => o.t === "renameField" ? `field ${o.entity}.${o.from}>${o.to}` : `entity ${o.from}>${o.to}`);
+
+  await page.selectOption("#rn-field", "qty"); await page.fill("#rn-to", "quantity");
+  await page.click('[data-fk="rn-preview"]'); await page.click('[data-fk="rn-apply"]');
+  await page.fill("#en-to", "Line"); await page.click('[data-fk="en-preview"]'); await page.click('[data-fk="en-apply"]');
+  assert.deepEqual(await ops(), ["field OrderLine.qty>quantity", "entity OrderLine>Line"]);
+  assert.equal(await panel(), "Field of Line", "the field panel shows the entity under its new name");
+  assert.ok((await fields()).includes("quantity"));
+
+  await page.click('[data-fk="undo"]');  // the entity rename
+  assert.deepEqual(await ops(), ["field OrderLine.qty>quantity"]);
+  assert.equal(await panel(), "Field of OrderLine");
+  assert.ok((await fields()).includes("quantity"), "the field rename is still in place");
+
+  await page.click('[data-fk="undo"]');  // the field rename
+  assert.deepEqual(await ops(), []);
+  assert.ok((await fields()).includes("qty") && !(await fields()).includes("quantity"));
+
+  await page.click('[data-fk="redo"]'); await page.click('[data-fk="redo"]');
+  assert.deepEqual(await ops(), ["field OrderLine.qty>quantity", "entity OrderLine>Line"]);
+  assert.equal(await panel(), "Field of Line"); assert.ok((await fields()).includes("quantity"));
+
+  // A rename after an undo drops the redo, as any edit does.
+  await page.click('[data-fk="undo"]');
+  await page.fill("#en-to", "Row"); await page.click('[data-fk="en-preview"]'); await page.click('[data-fk="en-apply"]');
+  assert.deepEqual(await ops(), ["field OrderLine.qty>quantity", "entity OrderLine>Row"]);
+  assert.equal(await page.locator('[data-fk="redo"]').isDisabled(), true);
+});
+
 test("entity rename in the UI lists what changes, with the table name as a separate choice", async () => {
   const page = await open("/public/index.html?mode=edit&form=OrderLineForm&user=dana");
   await page.waitForSelector("form");
