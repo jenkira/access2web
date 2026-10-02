@@ -88,6 +88,7 @@ async function editBackend(be: BackendClient) {
   let ed!: Editor;
   const saver = new DraftSaver(be, () => ed.history.log, lock.log, { delayMs: autosaveMs, heartbeatMs, onState: (_s, m) => ed?.setDraftState(m) });
   ed = new Editor(app, def, await be.lookups(def.forms), {
+    tableFollowsEntity: true,  // the backend names a table after its entity
     changed: () => saver.schedule(),
     async saveDraft() { await saver.saveNow(); if (saver.state !== "saved") throw new Error(saver.message); return `Draft saved with ${ed.history.log.length} edit${ed.history.log.length === 1 ? "" : "s"}.`; },
     async publish({ log, definition }) {
@@ -96,7 +97,8 @@ async function editBackend(be: BackendClient) {
       try { message = await be.publish(log, definition); } catch (e) { saver.unpause(); throw e; }
       try {
         const fresh = await be.lockDraft();  // the next draft starts from the version that is now live
-        ed.rebase(await be.loadDefinition(), message);
+        const next = await be.loadDefinition();
+        ed.rebase(next, message, await be.lookups(next.forms));
         saver.resume(fresh.log);
       } catch (e) {
         saver.stop();  // the version is live, but this page cannot carry on from it
@@ -110,7 +112,8 @@ async function editBackend(be: BackendClient) {
       try {
         await be.discardDraft();
         const fresh = await be.lockDraft();
-        ed.rebase(await be.loadDefinition(), "Discarded your draft.");
+        const next = await be.loadDefinition();
+        ed.rebase(next, "Discarded your draft.", await be.lookups(next.forms));
         saver.resume(fresh.log);
         return "Discarded your draft.";
       } catch (e) { saver.unpause(); throw e; }

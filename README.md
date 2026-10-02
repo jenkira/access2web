@@ -150,6 +150,10 @@ Table 3 shows what the page asks of the backend.
 | Run, Save | `POST /api/apps/{slug}/forms/{form}/records` | Edit data on the form |
 | Run, combo boxes and subforms | `GET /api/apps/{slug}/tables/{table}/records` | View data on the table |
 
+### Renaming in the editor
+
+The editor has a panel for a field rename and a panel for an entity rename. Each shows a preview before it applies: what changes in the forms, the data migration, and the handlers to review. In the backend an entity has the name of its table, so the entity panel asks for no table name, and it checks the new name as a table name: lower-case letters, digits, and underscores, at most 63 characters. A rename is an edit in the draft, so it can be undone, and it takes effect when the draft is published.
+
 ### The saved draft and its lock
 
 An editor opens a draft of the next version, and the backend holds it. Only one person holds the draft of an application at a time. Table 4 describes how it behaves.
@@ -207,7 +211,6 @@ Table 5 lists the environment variables.
 - Closing the editor does not release the lock. It lapses after 30 minutes, or a person with manage application can take the draft over. Opening the editor again as the same person resumes the draft at once.
 - The backend cannot replay a draft's edit log, so a corrupt log is found when the editor opens it, not when it is saved.
 - A draft belongs to the application, not to a form. Two designers cannot edit different forms at the same time.
-- The editor page can rename a field but not an entity. The route accepts both, and the editor refuses to send an entity rename that would give the table another name, because the backend names a table after its entity.
 - The editor is a prototype from Spike 5. Its page does not use the portal's styling or sign-in.
 - After an entity rename, earlier audit events keep the old table name, because the log is append-only. New events use the new name.
 - A new version briefly blocks new requests to the application while it renames. A busy application can make the publish wait, and then fail with 409.

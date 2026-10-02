@@ -2,7 +2,7 @@
 // Every operation can be done with the keyboard: buttons for move, fields for properties. Drag and drop is an extra.
 import { History } from "../model/history.ts";
 import type { Op } from "../model/ops.ts";
-import { planRenameField } from "../model/rename.ts";
+import { planRenameEntity, planRenameField } from "../model/rename.ts";
 import { OpError } from "../model/validate.ts";
 import { ruleWarnings, warningsForControl } from "../model/lint.ts";
 import { type Control, type Definition, type Form, allControls } from "../model/types.ts";
@@ -19,7 +19,15 @@ export interface EditorHooks {
   changed?(log: Op[]): void;
   /** Throw the saved draft away and start again from the published version. Offered as a button when present. */
   discard?(): Promise<string>;
+  /**
+   * True when an entity has the name of its table, as in the backend. Renaming an entity then renames its table,
+   * so the page does not ask for a table name, and it checks the new name as a table name.
+   */
+  tableFollowsEntity?: boolean;
 }
+
+/** What a table name may be, in the backend. Checked in the page so a bad name is found when it is typed, not at publish. */
+const TABLE_NAME = /^[a-z_][a-z0-9_]{0,62}$/;
 
 export class Editor {
   history: History;
@@ -29,6 +37,8 @@ export class Editor {
   private statusKind: "status" | "alert" = "status";
   private renamePreview: ReturnType<typeof planRenameField> | null = null;
   private renameDraft = { field: "", to: "" };  // kept across renders, so a preview does not reset the choice
+  private entityPreview: ReturnType<typeof planRenameEntity> | null = null;
+  private entityDraft = { entity: "", to: "", table: "" };
   private counter = 0;
   private draftState = "";  // shown beside the draft buttons. Changed without a redraw, so typing is not interrupted.
 
@@ -62,7 +72,7 @@ export class Editor {
       this.history.do(op);
       const fresh = ruleWarnings(this.history.current).filter((w) => !before.has(key(w)));
       this.say(fresh.length ? `${ok} Warning: ${fresh[0]!.message}` : ok);
-      this.renamePreview = null; this.render(); this.hooks.changed?.(this.history.log); return true;
+      this.renamePreview = null; this.entityPreview = null; this.render(); this.hooks.changed?.(this.history.log); return true;
     }
     catch (e) { if (e instanceof OpError) { this.say(`Not changed: ${e.message}`, "alert"); this.render(); return false; } throw e; }
   }
@@ -130,12 +140,26 @@ export class Editor {
   }
 
   /** Start again from a definition, for example after a publish. The log, the undo history, and the selection are cleared. */
-  rebase(def: Definition, message = ""): void {
+  rebase(def: Definition, message = "", lookups?: Lookups): void {
     this.history = new History(def);
+    if (lookups) this.lookups = lookups;  // read again under the names of the new version
     this.selected = null; this.renamePreview = null; this.renameDraft = { field: "", to: "" };
+    this.entityPreview = null; this.entityDraft = { entity: "", to: "", table: "" };
     if (!def.forms.some((f) => f.name === this.form)) this.form = def.forms[0]!.name;
     if (message) this.say(message);
     this.render();
+  }
+
+  /**
+   * The rows for each entity, under the entity's name now. The rows were read under the names at the start of the draft,
+   * so a rename in the log (including one that was undone, redone, or resumed) points the new name at the same rows.
+   */
+  private lookupsNow(): Lookups {
+    const original: Record<string, string> = {};  // name now -> name the rows were read under
+    for (const op of this.history.log) if (op.t === "renameEntity") { original[op.to] = original[op.from] ?? op.from; delete original[op.from]; }
+    const out: Lookups = { ...this.lookups };
+    for (const [now, was] of Object.entries(original)) if (this.lookups[was]) { out[now] = this.lookups[was]!; delete out[was]; }
+    return out;
   }
 
   /** Edits that no publish has carried to the server. */
@@ -222,7 +246,7 @@ export class Editor {
 
     // preview with selection and drag and drop
     const view = renderForm(this.def, this.form, {
-      lookups: this.lookups, isNew: true,
+      lookups: this.lookupsNow(), isNew: true,
       decorate: (el, c) => {
         el.tabIndex = -1;
         el.classList.toggle("selected", this.selected === c.id);
@@ -243,6 +267,7 @@ export class Editor {
     const preview = h("section", { class: "preview", "aria-label": "Form preview" }, view.el);
     const props = this.properties(btn);
     const rename = this.renamePanel(btn);
+    const entityRename = this.entityRenamePanel(btn);
     const all = ruleWarnings(this.def);
     const warnList = all.length
       ? h("div", {}, h("h3", { id: "warn-h" }, `Warnings (${all.length})`),
@@ -267,7 +292,7 @@ export class Editor {
       h("div", { class: "editor-grid" },
         h("nav", { "aria-label": "Controls" }, h("h2", {}, "Controls"), list),
         preview,
-        h("div", {}, props, rename, draft)));
+        h("div", {}, props, rename, entityRename, draft)));
     if (focusKey) this.root.querySelector<HTMLElement>(`[data-fk="${focusKey}"]`)?.focus();
   }
 
@@ -329,6 +354,49 @@ export class Editor {
       sec.append(h("h3", {}, "Handlers to review"), p.handlersToReview.length ? h("ul", { id: "rn-handlers" }, ...p.handlersToReview.map((x) => h("li", {}, `${x.handler}, lines ${x.lines.join(", ")}`))) : h("p", {}, "None."));
       sec.append(h("h3", {}, "Data migration, applied when the draft is published"), h("pre", { id: "rn-sql", tabindex: "0", role: "region", "aria-label": "Data migration SQL" }, p.migration.join(";\n")));
       sec.append(btn("rn-apply", "Apply rename", () => { const to = nameIn.value, from = fieldSel.value; if (this.tryDo({ t: "renameField", entity: ent.name, from, to }, `Renamed ${from} to ${to}.`)) this.renameDraft = { field: to, to: "" }; }));
+    }
+    return sec;
+  }
+
+  /** Rename an entity. In the backend the table takes the new name too, so there is no separate table name to give. */
+  private entityRenamePanel(btn: (key: string, label: string, fn: () => void, enabled?: boolean, extra?: Record<string, string>) => HTMLButtonElement): HTMLElement {
+    const together = !!this.hooks.tableFollowsEntity;
+    const d = this.entityDraft;
+    if (!this.def.entities.some((e) => e.name === d.entity)) { d.entity = this.formDef.entity; d.to = ""; d.table = ""; this.entityPreview = null; }
+    const entSel = h("select", { id: "en-entity", "data-fk": "en-entity" }, ...this.def.entities.map((e) => h("option", { value: e.name, selected: e.name === d.entity }, e.name)));
+    const nameIn = h("input", { id: "en-to", type: "text", "data-fk": "en-to", value: d.to });
+    const tableIn = h("input", { id: "en-table", type: "text", "data-fk": "en-table", value: d.table });
+    entSel.addEventListener("change", () => { d.entity = entSel.value; this.entityPreview = null; });
+    nameIn.addEventListener("input", () => { d.to = nameIn.value; });
+    tableIn.addEventListener("input", () => { d.table = tableIn.value; });
+    const table = () => (together ? nameIn.value : tableIn.value.trim() || undefined);
+    const check = () => {
+      if (together && !TABLE_NAME.test(nameIn.value)) {
+        throw new OpError("an entity has the name of its table here, so use lower-case letters, digits, and underscores, and at most 63 characters");
+      }
+    };
+    const sec = h("section", { class: "panel", "aria-labelledby": "en-h" }, h("h2", { id: "en-h" }, "Rename an entity"),
+      h("div", { class: "prop" }, h("label", { for: "en-entity" }, "Entity"), entSel),
+      h("div", { class: "prop" }, h("label", { for: "en-to" }, "New name"), nameIn),
+      ...(together ? [] : [h("div", { class: "prop" }, h("label", { for: "en-table" }, "New table name (leave empty to keep the table name)"), tableIn)]),
+      btn("en-preview", "Preview entity rename", () => {
+        try { check(); this.entityPreview = planRenameEntity(this.def, entSel.value, nameIn.value, table()); this.say("Preview ready."); }
+        catch (e) { if (e instanceof OpError) { this.entityPreview = null; this.say(`Not changed: ${e.message}`, "alert"); } else throw e; }
+        this.render();
+      }));
+    const p = this.entityPreview;
+    if (p) {
+      sec.append(h("h3", {}, "This rename will update"), h("ul", { id: "en-updated" }, ...p.updated.map((u) => h("li", {}, u))));
+      sec.append(h("h3", {}, "Handlers to review"), p.handlersToReview.length ? h("ul", { id: "en-handlers" }, ...p.handlersToReview.map((x) => h("li", {}, `${x.handler}, lines ${x.lines.join(", ")}`))) : h("p", {}, "None."));
+      sec.append(h("h3", {}, "Data migration, applied when the draft is published"),
+        p.migration.length ? h("pre", { id: "en-sql", tabindex: "0", role: "region", "aria-label": "Entity data migration SQL" }, p.migration.join(";\n")) : h("p", { id: "en-sql" }, "None. The table keeps its name."));
+      sec.append(btn("en-apply", "Apply entity rename", () => {
+        const from = entSel.value, to = nameIn.value;
+        try { check(); } catch (e) { if (e instanceof OpError) { this.say(`Not changed: ${e.message}`, "alert"); this.render(); return; } throw e; }
+        if (this.tryDo({ t: "renameEntity", from, to, table: table() }, `Renamed the entity ${from} to ${to}.`)) {
+          this.entityDraft = { entity: to, to: "", table: "" };
+        }
+      }));
     }
     return sec;
   }

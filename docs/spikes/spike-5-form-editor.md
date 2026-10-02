@@ -65,7 +65,7 @@ The language has comparison, arithmetic, `&&`, `||`, `!`, and six functions: `is
 
 ### Operations
 
-An operation is one of nine edits: add, remove, and move a control, set a label, set a visibility rule, set validation rules, set a default, rename a field, and rename an entity. Table 2 gives the rules.
+An operation is one of nine edits: add, remove, and move a control, set a label, set a visibility rule, set validation rules, set a default, rename a field, and rename an entity. Table 2 gives the rules. The editor offers both renames, a field in one panel and an entity in another. Against the backend, an entity has the name of its table, so the entity panel asks for no table name and checks the new name as a table name.
 
 **Table 2. Operation rules**
 

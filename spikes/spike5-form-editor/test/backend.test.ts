@@ -334,3 +334,50 @@ test("a saved draft that does not replay is not opened, and can be discarded", a
   await page.waitForSelector("form");
   assert.equal((await draftOf(slug, "dana")).draft.log.length, 0);
 });
+
+test("the editor renames an entity and its table, and the backend carries it to the data", async () => {
+  const slug = await newApp();
+  const page = await open(editor(slug, "olive"));
+  await page.waitForSelector("form");
+  assert.equal(await page.locator("#en-table").count(), 0, "an entity has the name of its table here, so no table name is asked for");
+  await page.fill("#en-to", "Clients");
+  await page.click('[data-fk="en-preview"]');
+  assert.match(await statusText(page, /Not changed/), /lower-case letters, digits, and underscores/);
+  await page.fill("#en-to", "clients");
+  await page.click('[data-fk="en-preview"]');
+  assert.match(await page.locator("#en-sql").innerText(), new RegExp(`alter table "app_${slug}"."customers" rename to "clients"`), "the preview shows the statement the backend will run");
+  assert.ok((await page.locator("#en-updated li").allInnerTexts()).includes("form CustomerForm"));
+  await page.click('[data-fk="en-apply"]');
+  await draftState(page, /Draft saved/);
+  assert.equal((await draftOf(slug, "olive")).draft.log[0].t, "renameEntity", "the draft holds the rename");
+  await page.click('[data-fk="publish"]');
+  assert.match(await statusText(page, /Published as version 2/), /Published as version 2/);
+
+  const tables = (await db.query("select table_name from information_schema.tables where table_schema = $1", ["app_" + slug])).rows.map((r) => r.table_name);
+  assert.ok(tables.includes("clients") && !tables.includes("customers"), tables.join(","));
+  assert.equal((await db.query(`select count(*)::int as n from "app_${slug}".clients`)).rows[0].n, 2, "the rows came with the table");
+  const def = (await api("GET", `/api/apps/${slug}/definition`, who("olive"))).body;
+  assert.deepEqual(def.entities.map((e: any) => e.name), ["clients"]); assert.equal(def.forms[0].entity, "clients");
+
+  // The page carries on from version 2, and a person who enters data saves into the renamed table.
+  assert.ok((await page.locator('[data-fk="en-entity"] option').allInnerTexts()).includes("clients"));
+  const run = await open(runner(slug, "ed"));
+  await run.waitForSelector("form");
+  await run.fill("#ctl-CustomerForm-c_name", "Zed"); await run.fill("#ctl-CustomerForm-c_email", "zed@x.test");
+  await run.click("#save");
+  await run.waitForFunction(() => document.getElementById("result")?.textContent?.startsWith("Saved"));
+  assert.equal((await db.query(`select email from "app_${slug}".clients where customer_name = 'Zed'`)).rows[0].email, "zed@x.test");
+});
+
+test("an entity rename in a saved draft comes back after a reload, and can be undone", async () => {
+  const slug = await newApp();
+  const page = await open(editor(slug, "dana"));
+  await page.waitForSelector("form");
+  await page.fill("#en-to", "clients"); await page.click('[data-fk="en-preview"]'); await page.click('[data-fk="en-apply"]');
+  await draftState(page, /Draft saved/);
+  await page.waitForFunction(() => (window as any).__spike5.saver.state === "saved");
+  await page.reload(); await page.waitForSelector("form");
+  assert.ok((await page.locator('[data-fk="en-entity"] option').allInnerTexts()).includes("clients"));
+  await page.click('[data-fk="undo"]');
+  assert.ok((await page.locator('[data-fk="en-entity"] option').allInnerTexts()).includes("customers"));
+});

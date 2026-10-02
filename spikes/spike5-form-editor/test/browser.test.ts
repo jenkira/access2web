@@ -279,6 +279,55 @@ test("rename in the UI lists what changes and which handlers need review", async
   assert.equal(await page.locator("#rn-to").inputValue(), "x");
 });
 
+test("entity rename in the UI lists what changes, with the table name as a separate choice", async () => {
+  const page = await open("/public/index.html?mode=edit&form=OrderLineForm&user=dana");
+  await page.waitForSelector("form");
+  assert.equal(await page.locator("#en-entity").inputValue(), "OrderLine", "it starts with the entity of the form");
+  assert.equal(await page.locator("#en-table").count(), 1, "the prototype keeps an entity and its table apart");
+  await page.fill("#en-to", "Line"); await page.fill("#en-table", "order_lines");
+  await page.click('[data-fk="en-preview"]');
+  const updated = await page.locator("#en-updated li").allInnerTexts();
+  assert.ok(updated.includes("form OrderLineForm") && updated.includes("form OrderForm, control o_lines") && updated.includes("query OrderTotals"), updated.join("; "));
+  assert.deepEqual((await page.locator("#en-handlers li").allInnerTexts()).map((t) => t.split(",")[0]), ["07-recalc-order-total"]);
+  assert.match(await page.locator("#en-sql").innerText(), /alter table "app_demo"."orderlines" rename to "order_lines"/);
+  await page.click('[data-fk="en-apply"]');
+  assert.ok((await page.locator('[data-fk="en-entity"] option').allInnerTexts()).includes("Line"));
+  assert.equal(await page.evaluate(() => (window as any).__spike5.editor.history.current.forms.find((f: any) => f.name === "OrderLineForm").entity), "Line");
+  assert.deepEqual((await log(page)).map((o: any) => [o.t, o.from, o.to, o.table]), [["renameEntity", "OrderLine", "Line", "order_lines"]]);
+  await page.click('[data-fk="undo"]');
+  assert.ok((await page.locator('[data-fk="en-entity"] option').allInnerTexts()).includes("OrderLine"), "undo brings the name back");
+});
+
+test("an entity rename without a table name keeps the table, and a name that is taken is refused", async () => {
+  const page = await open("/public/index.html?mode=edit&form=OrderLineForm&user=dana");
+  await page.waitForSelector("form");
+  await page.fill("#en-to", "Order");
+  await page.click('[data-fk="en-preview"]');
+  assert.match(await status(page, /Not changed/), /already exists/);
+  await page.fill("#en-to", "Line");
+  await page.click('[data-fk="en-preview"]');
+  assert.match(await page.locator("#en-sql").innerText(), /None\. The table keeps its name\./);
+  await page.click('[data-fk="en-apply"]');
+  assert.deepEqual((await log(page)).map((o: any) => [o.from, o.to]), [["OrderLine", "Line"]]);
+});
+
+test("a combo box keeps its rows when the entity it reads from is renamed", async () => {
+  const page = await open("/public/index.html?mode=edit&form=OrderForm&user=dana");
+  await page.waitForSelector("form");
+  const before = await page.locator("#ctl-OrderForm-o_cust option").count();
+  assert.ok(before > 1, "the demo combo has rows");
+  await page.selectOption("#en-entity", "Customer"); await page.fill("#en-to", "Client");
+  await page.click('[data-fk="en-preview"]'); await page.click('[data-fk="en-apply"]');
+  assert.equal(await page.locator("#ctl-OrderForm-o_cust option").count(), before, "the rows followed the new name");
+  await page.click('[data-fk="undo"]');
+  assert.equal(await page.locator("#ctl-OrderForm-o_cust option").count(), before, "and followed it back when the rename was undone");
+  await page.click('[data-fk="redo"]');
+  assert.equal(await page.locator("#ctl-OrderForm-o_cust option").count(), before, "and again when it was redone");
+  await page.fill("#en-to", "Client2"); await page.selectOption("#en-entity", "Client");
+  await page.click('[data-fk="en-preview"]'); await page.click('[data-fk="en-apply"]');
+  assert.equal(await page.locator("#ctl-OrderForm-o_cust option").count(), before, "and through a second rename");
+});
+
 test("Design can save a draft but not publish. Manage can publish.", async () => {
   const design = await open("/public/index.html?mode=edit&form=CustomerForm&user=dana");
   await design.waitForSelector("form");

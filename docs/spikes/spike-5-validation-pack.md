@@ -44,7 +44,7 @@ Two differences matter for the session. The forms are the real forms of that app
 
 - The forms are synthetic. They are not your Access forms. Replace them with the real forms from Spike 1 before the owner rates fidelity.
 - The prototype edits and previews forms. It does not save records to a database.
-- The editor supports these edits: add, remove, and move a control, and change a label, a visibility rule, a validation rule, and a default. It also renames a field.
+- The editor supports these edits: add, remove, and move a control, and change a label, a visibility rule, a validation rule, and a default. It also renames a field and an entity.
 
 ## Part 1: owner's ratings of the rendered forms
 
