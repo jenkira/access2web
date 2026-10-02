@@ -118,6 +118,15 @@ A comparison with null is false, and arithmetic with null is null, as in SQL. A 
 
 This has a consequence for validation rules. A rule such as `discount >= 0` **fails when the field is empty**. For an optional field, write `isnull(discount) || discount >= 0`.
 
+The form editor warns about this. It tries sample values, and warns when a rule is false whenever its own field is empty, yet is true for some filled value. The warning offers a button that rewrites the rule as `isnull(field) || (rule)`. The editor does not warn when:
+
+- The field is required, because an empty required field is already an error.
+- The rule already passes for an empty field, for example `isnull(x) || x > 0`.
+- The rule passes for an empty field when another field has some value. A rule such as `status == 'open' || qty > 0` is not reported.
+- No value satisfies the rule at all. That is a different problem, and the editor does not check for it.
+
+The warning is advice. It never blocks an edit or a publish. The check is not part of the language, so the Python evaluator does not need it. A publish service written in Python would need its own copy to report warnings.
+
 ### Today
 
 `today()` returns the UTC date of the time that the caller supplies. If the browser and the server each use their own clock, a rule that uses `today()` can give different answers around midnight UTC. The design is for the server to fix one event time for a save and pass it to every evaluation. The prototype does not do this yet: the browser uses its own clock, and the server uses its own.

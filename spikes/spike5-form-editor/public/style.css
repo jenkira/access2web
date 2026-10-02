@@ -34,3 +34,6 @@ fieldset { border: 1px solid var(--line); border-radius: 4px; }
 #status[role="alert"] { color: var(--err); font-weight: 600; }
 .banner { background: #fff4e5; border: 2px solid #8a4b00; color: #4a2800; padding: 8px 12px; border-radius: 4px; }
 pre { background: var(--soft); padding: 8px; overflow: auto; white-space: pre-wrap; word-break: break-word; }
+
+.warn { background: #fff4e5; border: 1px solid #8a4b00; color: #4a2800; padding: 6px 8px; border-radius: 4px; margin: -4px 0 8px; }
+#warning-list { padding-left: 18px; margin: 4px 0 8px; }

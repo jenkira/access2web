@@ -195,6 +195,15 @@ test("automated accessibility check: forms and editor", async () => {
   report["editor with preview and error"] = v;
   critical += v.filter((x: any) => x.impact === "critical").length;
   serious += v.filter((x: any) => x.impact === "serious").length;
+  // the editor with a warning, and the warning list, on screen
+  const warn = await open("/public/index.html?mode=edit&form=OrderLineForm&user=dana");
+  await warn.waitForSelector("form");
+  await warn.click('[data-select="l_disc"]');
+  await warn.waitForSelector("#rule-warn-0");
+  const vw = await axe(warn);
+  report["editor with a rule warning"] = vw;
+  critical += vw.filter((x: any) => x.impact === "critical").length;
+  serious += vw.filter((x: any) => x.impact === "serious").length;
   results.accessibility = { tags: AXE_TAGS, pages: Object.keys(report).length, critical, serious, violations: report };
   assert.equal(critical, 0, JSON.stringify(report));
   assert.equal(serious, 0, JSON.stringify(report));
@@ -293,4 +302,70 @@ test("a person with no grant cannot edit at all", async () => {
   await page.waitForSelector("form");
   await page.click('[data-fk="save"]');
   assert.match(await status(page, /do not have permission to edit/), /do not have permission to edit/);
+});
+
+test("a rule that rejects an empty optional field gets a warning with a fix, and undo brings the warning back", async () => {
+  const page = await open("/public/index.html?mode=edit&form=OrderLineForm&user=dana");
+  await page.waitForSelector("form");
+  assert.equal(await page.locator("#rule-warn-0").count(), 0, "nothing is selected yet");
+  assert.match(await page.locator("#warning-list").innerText(), /Rule 1 is false when Discount is empty/, "the draft panel lists it before anything is selected");
+  await page.click('[data-select="l_disc"]');
+  const note = page.locator("#rule-warn-0");
+  assert.equal(await note.getAttribute("role"), "note");
+  assert.match(await note.innerText(), /Warning: Rule 1 is false when Discount is empty, so Discount cannot be left empty/);
+  assert.equal(await page.locator('[data-fk="rule-e-0"]').getAttribute("aria-describedby"), "rule-warn-0", "the rule field points at its warning");
+
+  await page.click('[data-fk="rule-fix-0"]');
+  assert.equal(await page.locator("#rule-warn-0").count(), 0, "the warning is gone");
+  assert.equal(await page.locator('[data-fk="rule-e-0"]').inputValue(), "isnull(discount) || (discount >= 0 && discount <= 1)");
+  assert.match(await page.locator("#status").innerText(), /Rule 1 now allows an empty value/);
+  assert.equal(await page.locator("#warn-h").innerText(), "Warnings (1)", "the other demo warning remains");
+  assert.doesNotMatch(await page.locator("#warning-list").innerText(), /Discount/);
+
+  await page.click('[data-fk="undo"]');
+  assert.equal(await page.locator("#rule-warn-0").count(), 1, "undo brings the warning back");
+  assert.equal(await page.locator("#warn-h").innerText(), "Warnings (2)");
+  assert.equal(await page.evaluate(() => (window as any).__spike5.editor.history.verify()), true);
+  assert.equal((await log(page)).length, 0);
+});
+
+test("adding a rule that rejects empty says so in the status line", async () => {
+  const page = await open("/public/index.html?mode=edit&form=CustomerForm&user=dana");
+  await page.waitForSelector("form");
+  await page.click('[data-select="c_credit"]');
+  await page.fill("#rule-new-e", "credit_limit > 0");
+  await page.fill("#rule-new-m", "Must be positive");
+  await page.click('[data-fk="rule-add"]');
+  const msg = await status(page, /Warning/);
+  assert.match(msg, /Added the rule\. Warning: Rule 1 is false when Credit limit is empty/);
+  assert.match(await page.locator("#warning-list").innerText(), /Credit limit is empty/);
+});
+
+test("keyboard only: reach the fix button and use it", async () => {
+  const page = await open("/public/index.html?mode=edit&form=OrderLineForm&user=dana");
+  await page.waitForSelector("form");
+  await tabTo(page, '[data-select="l_disc"]');
+  await page.keyboard.press("Enter");
+  await tabTo(page, '[data-fk="rule-fix-0"]');
+  await page.keyboard.press("Enter");
+  assert.equal(await page.locator("#rule-warn-0").count(), 0);
+  assert.equal((await log(page)).at(-1).t, "setValidation");
+});
+
+test("the warning list can take you to the control", async () => {
+  const page = await open("/public/index.html?mode=edit&form=CustomerForm&user=dana");
+  await page.waitForSelector("form");
+  assert.match(await page.locator("#warning-list").innerText(), /Credit review/);
+  await page.click('[data-fk="warn-show-v_credit-0"]');
+  assert.equal(await page.locator("#form-select").inputValue(), "CreditReviewForm");
+  assert.equal(await page.locator('[data-select="v_credit"]').getAttribute("aria-pressed"), "true");
+  assert.equal(await page.locator("#rule-warn-0").count(), 1);
+});
+
+test("publishing with a warning works and says how many warnings remain", async () => {
+  const page = await open("/public/index.html?mode=edit&form=CustomerForm&user=mia");
+  await page.waitForSelector("form");
+  await page.click('[data-select="c_name"]'); await page.fill("#p-label", "Full name"); await page.locator("#p-label").blur();
+  await page.click('[data-fk="publish"]');
+  assert.match(await status(page, /Published as version 2/), /Published as version 2\. 2 rule warnings remain/);
 });

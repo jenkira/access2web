@@ -4,6 +4,7 @@ import { History } from "../model/history.ts";
 import type { Op } from "../model/ops.ts";
 import { planRenameField } from "../model/rename.ts";
 import { OpError } from "../model/validate.ts";
+import { ruleWarnings, warningsForControl } from "../model/lint.ts";
 import { type Control, type Definition, type Form, allControls } from "../model/types.ts";
 import { h } from "./dom.ts";
 import { type Lookups, renderForm } from "./render.ts";
@@ -46,7 +47,14 @@ export class Editor {
 
   /** Apply an edit. A rejected edit shows its reason and changes nothing. */
   tryDo(op: Op, ok: string): boolean {
-    try { this.history.do(op); this.say(ok); this.renamePreview = null; this.render(); return true; }
+    try {
+      const key = (w: { form: string; control: string; ruleIndex: number }) => `${w.form}/${w.control}/${w.ruleIndex}`;
+      const before = new Set(ruleWarnings(this.history.current).map(key));
+      this.history.do(op);
+      const fresh = ruleWarnings(this.history.current).filter((w) => !before.has(key(w)));
+      this.say(fresh.length ? `${ok} Warning: ${fresh[0]!.message}` : ok);
+      this.renamePreview = null; this.render(); return true;
+    }
     catch (e) { if (e instanceof OpError) { this.say(`Not changed: ${e.message}`, "alert"); this.render(); return false; } throw e; }
   }
 
@@ -196,8 +204,18 @@ export class Editor {
     const preview = h("section", { class: "preview", "aria-label": "Form preview" }, view.el);
     const props = this.properties(btn);
     const rename = this.renamePanel(btn);
+    const all = ruleWarnings(this.def);
+    const warnList = all.length
+      ? h("div", {}, h("h3", { id: "warn-h" }, `Warnings (${all.length})`),
+          h("ul", { id: "warning-list", "aria-labelledby": "warn-h" }, ...all.map((w) => {
+            const form = this.def.forms.find((x) => x.name === w.form)!;
+            const ctl = allControls(form).find((x) => x.id === w.control)!;
+            const show = btn(`warn-show-${w.control}-${w.ruleIndex}`, "Show", () => { this.form = w.form; this.selected = w.control; this.render(); }, true, { "aria-label": `Show ${"label" in ctl ? ctl.label : ctl.id} in ${form.title}` });
+            return h("li", {}, `${form.title}: ${w.message} `, show);
+          })))
+      : h("p", { id: "no-warnings" }, "No warnings.");
     const draft = h("section", { class: "panel", "aria-labelledby": "draft-h" }, h("h2", { id: "draft-h" }, "Draft"),
-      h("p", {}, `Edits in the log: ${this.history.log.length}`),
+      h("p", {}, `Edits in the log: ${this.history.log.length}`), warnList,
       btn("save", "Save draft", async () => { if (!this.hooks.saveDraft) return; try { this.say(await this.hooks.saveDraft(this.history.log)); } catch (e) { this.say((e as Error).message, "alert"); } this.render(); }, !!this.hooks.saveDraft),
       btn("publish", "Publish", async () => { if (!this.hooks.publish) return; try { this.say(await this.hooks.publish()); } catch (e) { this.say((e as Error).message, "alert"); } this.render(); }, !!this.hooks.publish));
 
@@ -229,11 +247,17 @@ export class Editor {
       const rules = h("fieldset", {}, h("legend", {}, "Validation rules"));
       const rows = (c.validate ?? []).map((r) => ({ ...r }));
       const draftRules = rows.length ? rows : [];
+      const warnings = warningsForControl(this.def, this.formDef, c);
       draftRules.forEach((r, i) => {
-        const e = h("input", { type: "text", value: r.expr, "aria-label": `Rule ${i + 1} expression`, "data-fk": `rule-e-${i}` });
+        const w = warnings.find((x) => x.ruleIndex === i);
+        const e = h("input", { type: "text", value: r.expr, "aria-label": `Rule ${i + 1} expression`, "data-fk": `rule-e-${i}`, ...(w ? { "aria-describedby": `rule-warn-${i}` } : {}) });
         const m = h("input", { type: "text", value: r.message, "aria-label": `Rule ${i + 1} message`, "data-fk": `rule-m-${i}` });
         e.addEventListener("input", () => { r.expr = e.value; }); m.addEventListener("input", () => { r.message = m.value; });
         rules.append(h("div", { class: "rule" }, e, m, btn(`rule-del-${i}`, "Remove rule", () => { draftRules.splice(i, 1); this.tryDo({ t: "setValidation", form: this.form, id: c.id, rules: draftRules }, "Removed the rule."); }, true, { "aria-label": `Remove rule ${i + 1}` })));
+        if (w) {
+          rules.append(h("div", { class: "warn", role: "note", id: `rule-warn-${i}` }, h("strong", {}, "Warning: "), w.message, " ",
+            btn(`rule-fix-${i}`, "Allow an empty value", () => this.tryDo({ t: "setValidation", form: this.form, id: c.id, rules: draftRules.map((x, j) => (j === i ? { ...x, expr: w.fix } : x)) }, `Rule ${i + 1} now allows an empty value.`), true, { "aria-label": `Allow an empty value in rule ${i + 1}` })));
+        }
       });
       const ne = h("input", { type: "text", id: "rule-new-e", "aria-label": "New rule expression", placeholder: "qty > 0", "data-fk": "rule-new-e" });
       const nm = h("input", { type: "text", id: "rule-new-m", "aria-label": "New rule message", placeholder: "Message shown when it fails", "data-fk": "rule-new-m" });

@@ -97,7 +97,7 @@ A query that the rewriter cannot place with certainty is listed for review. It i
 - Node.js 22.22, TypeScript 5.9, PostgreSQL 16.14, Chromium 141, Playwright 1.63, and axe-core 4.13.
 - One Linux container. No screen reader, and no Access.
 - Prototype: about 1,340 lines of source and about 790 lines of tests, in `spikes/spike5-form-editor/`.
-- Run `npm test` for the 95 tests. Run `npm run serve` for a session.
+- Run `npm test` for the 112 tests. Run `npm run serve` for a session.
 
 ## Measures
 
@@ -290,7 +290,7 @@ This list comes from my general knowledge of Access. It does not come from real 
 ### Other findings
 
 - **Positions in a move.** Counting positions after the control leaves its row was the one rule that needed to be fixed in writing, because an emptied row shifts every index.
-- **Strict rules help the second implementation.** A rule on an empty field fails, because a comparison with null is false. An owner must write `isnull(x) || x > 0` for an optional field. The specification says so, but the editor does not warn about it yet.
+- **A rule on an empty field fails, and the editor now warns about it.** A comparison with null is false, so `discount >= 0` rejects an empty discount, and an owner who meant "optional" has made the field required. The editor shows a warning under the rule, with a button that rewrites it as `isnull(discount) || (...)`. The fix goes through the operation log, so undo brings the warning back. The draft panel lists every warning, and a publish reports how many remain. A warning never blocks a publish.
 - **Preview state.** The first browser run found that clicking "Preview rename" reset the chosen field and the new name, so "Apply rename" used empty values. The editor now keeps the choice across redraws.
 - **The log needs the ids.** New controls and rows get their ids when the edit is made, and the id is stored in the operation. Replaying the log then gives the same draft.
 - **Handlers are never edited.** A handler is code, and a person must decide how a rename affects it.
@@ -319,7 +319,7 @@ All spike code is in `spikes/spike5-form-editor/`. It is prototype code and must
 | `src/ui/` | Renderer, editor, and page entry point |
 | `src/server/` | Draft workflow, permissions, and the session server |
 | `fixtures/` | Five synthetic forms, queries, and sample data |
-| `test/` | 95 tests: expressions, the shared vectors, operations, a randomised log test, rename against PostgreSQL, the workflow, and Chromium |
+| `test/` | 112 tests: expressions, the shared vectors, the rule lint, operations, a randomised log test, rename against PostgreSQL, the workflow, and Chromium |
 | `tools/` | A batch evaluator for the differential test, and the script that writes the form vectors |
 | `../../backend/a2w/expr.py`, `formrules.py` | The Python evaluator and the server-side form checker |
 | `../../spec/expression/` | The shared conformance cases |

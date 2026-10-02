@@ -44,7 +44,8 @@ test("a person with Manage can edit and publish", async () => {
   await call("POST", "/api/draft/lock", "mia");
   await call("POST", "/api/draft/ops", "mia", { log: [label("Full name")] });
   const pub = await call("POST", "/api/draft/publish", "mia");
-  assert.deepEqual(pub.body, { version: 2 });
+  assert.equal(pub.body.version, 2);
+  assert.equal(pub.body.warnings.length, 2, "the demo forms already hold two rules that reject an empty optional field");
   assert.equal(srv.state.versions.length, 2);
 });
 
@@ -121,7 +122,7 @@ test("publishing is audited with the number of edits and the versions", async ()
   await call("POST", "/api/draft/publish", "mia");
   const audit = (await call("GET", "/api/audit", "mia")).body;
   assert.deepEqual(audit.map((e: any) => e.action), ["draft_locked", "publish"]);
-  assert.deepEqual(audit[1].detail, { ops: 2, from: 1, to: 2, changed: true });
+  assert.deepEqual(audit[1].detail, { ops: 2, from: 1, to: 2, changed: true, warnings: 2 });
 });
 
 test("a published version is a snapshot: later drafts do not change it", async () => {
@@ -133,4 +134,18 @@ test("a published version is a snapshot: later drafts do not change it", async (
   await call("POST", "/api/draft/ops", "mia", { log: [label("V3")] });
   assert.equal((srv.state.versions[1]!.forms[0]!.rows[0]!.controls[0] as { label: string }).label, v2Label);
   assert.equal(srv.state.versions[0]!.forms[0]!.rows[0]!.controls[0] && (srv.state.versions[0]!.forms[0]!.rows[0]!.controls[0] as { label: string }).label, "Name");
+});
+
+test("a rule that rejects an empty optional field gives a warning at publish, and does not block it", async () => {
+  await call("POST", "/api/draft/lock", "mia");
+  const rules = [{ expr: "credit_limit > 0", message: "Must be positive" }];
+  await call("POST", "/api/draft/ops", "mia", { log: [{ t: "setValidation", form: "CustomerForm", id: "c_credit", rules }] });
+  const pub = await call("POST", "/api/draft/publish", "mia");
+  assert.equal(pub.status, 200);
+  assert.equal(pub.body.version, 2);
+  assert.equal(pub.body.warnings.length, 3, "two from the demo forms, and the new one");
+  const mine = pub.body.warnings.find((w: any) => w.control === "c_credit");
+  assert.equal(mine.fix, "isnull(credit_limit) || (credit_limit > 0)");
+  const audit = (await call("GET", "/api/audit", "mia")).body;
+  assert.equal(audit.at(-1).detail.warnings, 3);
 });

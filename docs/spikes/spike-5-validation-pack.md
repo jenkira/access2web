@@ -172,3 +172,4 @@ The automated tests found three things that a person might trip over. Watch for 
 - **Keyboard route:** the keyboard-only test needed 105 key presses for a seven-step session, because there is no shortcut from the control list to the property panel.
 - **Rename preview:** the preview lists what changes and which handlers need review. Check whether participants understand that the data change happens only when the draft is published.
 - **Expression syntax:** visibility rules, validation rules, and defaults use text expressions such as `active && credit_limit > 100`. Check whether participants need a builder instead.
+- **The empty-field warning:** a validation rule on an optional field warns when it rejects an empty value, and offers a fix. In task 3, check whether the participant sees the warning, understands it, and uses the fix button.

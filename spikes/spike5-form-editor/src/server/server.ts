@@ -6,6 +6,7 @@ import { extname, join, normalize } from "node:path";
 import { History } from "../model/history.ts";
 import type { Op } from "../model/ops.ts";
 import { OpError, validateDefinition } from "../model/validate.ts";
+import { ruleWarnings } from "../model/lint.ts";
 import { canonical, type Definition } from "../model/types.ts";
 import { failedRules, unknownFields, type Rec } from "../ui/render.ts";
 import { can, type Grants } from "./permissions.ts";
@@ -96,11 +97,12 @@ export function createServer(opts: { base: Definition; grants: Grants; staticDir
       const problems = validateDefinition(next);
       if (problems.length) return send(res, 422, { error: "invalid_definition", problems });
       next.version = current().version + 1;
-      const diff = { ops: state.draft.log.length, from: current().version, to: next.version, changed: canonical(next) !== canonical(base) };
+      const warnings = ruleWarnings(next);  // advisory: a warning never blocks a publish
+      const diff = { ops: state.draft.log.length, from: current().version, to: next.version, changed: canonical(next) !== canonical(base), warnings: warnings.length };
       state.versions.push(next);
       state.draft = null;
       log(user!, "publish", diff);
-      return send(res, 200, { version: next.version });
+      return send(res, 200, { version: next.version, warnings });
     }
     return send(res, 404, { error: "not found" });
   }

@@ -55,7 +55,8 @@ async function edit() {
       const r = await api("POST", "/api/draft/publish");
       if (r.status === 403) throw new Error("You can edit this draft, but you do not have permission to publish it.");
       if (r.status !== 200) throw new Error(`Not published: ${r.body.message ?? r.body.error}`);
-      return `Published as version ${r.body.version}.`;
+      const n = (r.body.warnings as unknown[] | undefined)?.length ?? 0;
+      return `Published as version ${r.body.version}.${n ? ` ${n} rule warning${n === 1 ? "" : "s"} remain, so some optional fields cannot be left empty.` : ""}`;
     },
   }, editForm);
   (window as unknown as { __spike5: unknown }).__spike5 = { editor: ed };
