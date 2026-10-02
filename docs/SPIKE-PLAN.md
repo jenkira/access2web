@@ -89,7 +89,7 @@ The design proposes a disposable VM for each job. This part compares that choice
 1. A Windows VM, restored from a snapshot for each job.
 2. A Windows container with Hyper-V isolation.
 3. A Windows container with process isolation.
-4. A Kubernetes Job on a Windows node pool, with process isolation, and with Hyper-V isolation through a runtime class if the cluster supports it. Check that the image build matches the node build.
+4. A Kubernetes Job on an RKE2 Windows node pool with Calico, with process isolation, and with Hyper-V isolation through a runtime class if the cluster supports it. Check that the image build matches the node build.
 
 For each configuration, check these points:
 
@@ -99,7 +99,7 @@ For each configuration, check these points:
 - Memory and CPU use for each job.
 - Whether network access blocks fully.
 - Whether a hostile file can reach the host or another job's data. Test with the marker file from Part 1b.
-- In the Kubernetes configuration, whether the cluster's network policy engine blocks outbound traffic from a Windows pod, and how long a Windows node takes to start when the pool scales up.
+- In the Kubernetes configuration, whether Calico blocks outbound traffic from a Windows pod, how long a Windows node takes to start when the pool scales up, and whether the Windows worker image can be pulled through ProGet, given that Windows base image layers are non-distributable.
 
 A process-isolated container shares the host kernel. For untrusted files this is a weaker boundary than a VM, so the team must not choose it unless the security owner accepts the risk. A Linux container cannot run Access, and running Access under a compatibility layer such as Wine is not a supported approach. Linux containers are suitable for the native tier only.
 
@@ -269,14 +269,14 @@ Can a locally hosted model translate VBA procedures to TypeScript handlers that 
 
 ### Time box
 
-An estimate of 5 working days for one engineer, after Spike 3 delivers its hand-translated handlers. The spike also needs a GPU server (open item O5).
+An estimate of 5 working days for one engineer, after Spike 3 delivers its hand-translated handlers. The spike also needs a machine to host the models (open item O5). The cluster has no GPU nodes, so the first choice is a high-memory CPU node.
 
 ### Method
 
 To evaluate the model:
 
 1. Build an evaluation set of 30 or more VBA procedures from the sample databases. Include the 10 procedures from Spike 3, which have hand-written reference handlers. Include at least 10 procedures that belong in manual redesign, such as automation of Excel or Outlook, Windows API calls, and file access.
-2. Choose two or three candidate models. Cover a mid-size class of about 14 billion parameters, a class of about 30 billion parameters, and a larger class if the hardware allows it. Candidates include models in the Qwen3-Coder family. Confirm the licence and availability of each model on the first day.
+2. Choose two or three candidate models. Because the models run on CPU, include a mixture-of-experts model of about 30 billion parameters with about 3 billion active, which suits CPU serving. Include a dense model of about 14 billion parameters as a quality baseline, and a larger class if the hardware allows it. Candidates include models in the Qwen3-Coder family. Confirm the licence and availability of each model on the first day.
 3. Serve the models locally with Ollama or llama.cpp. Record the hardware, quantisation level, and context length.
 4. Build the translation prompt from the technical design: the procedure, the entity and field definitions, and the handler interface.
 5. Run each model on the full set. Parse each result, and reject any output that uses anything outside the handler interface.
@@ -285,7 +285,7 @@ To evaluate the model:
 8. Run the generated handlers in the Spike 3 sandbox against tests, and compare the outputs with the reference handlers.
 9. Ask the application owner to rate a sample of 15 results as approvable as is, approvable with minor edits, or not approvable.
 10. Record the time and memory use for each model.
-11. Run the best model on a GPU node in the Kubernetes cluster. Record the GPU memory, the pod start-up time including model loading, and whether a readiness probe can detect that the model is ready.
+11. Run the best model on a high-memory CPU node in the Kubernetes cluster with llama.cpp. Record the tokens per second, the memory use, the pod start-up time including model loading, and whether a readiness probe can detect that the model is ready. If the speed does not meet the time measure, repeat the test on an external GPU server, and record the cost.
 
 ### Measures
 
@@ -381,7 +381,7 @@ Table 7 shows the order of work. The durations are estimates, and the owner must
 
 | Week | Spike 1 | Spike 2 | Spike 3 | Spike 4 | Spike 5 |
 |---|---|---|---|---|---|
-| Before week 1 | Nominate databases, confirm Access licence and a Windows test machine | | | Arrange a GPU server | Arrange three test users |
+| Before week 1 | Nominate databases, confirm Access licence and a Windows test machine | | | Arrange a high-memory CPU node | Arrange three test users |
 | 1 | Parts 1a and 1b | | Harness and 10 handlers | | |
 | 2 | Parts 1c and 1d, and report | Collect queries, build the prototype | Hostile suite and report | Prepare the evaluation set | Renderer prototype |
 | 3 | | Compare results and report | | Run models | Editor, operation log, rename, and drafts |
@@ -396,7 +396,7 @@ The spikes cannot start until these items exist:
 - Three to five sample databases, nominated by the application owner and copied to a restricted location.
 - The owner's existing PowerShell automation scripts for Access.
 - A Windows Server machine or VM with a licensed copy of Microsoft Access.
-- A GPU server for Spike 4, or a decision on how to obtain one.
+- A high-memory CPU node for Spike 4, or a decision to fund an external GPU server.
 - Three representative users for the Spike 5 usability session, with half a day each.
 - Someone to confirm the licence and support position for Access on a server or in a container.
 

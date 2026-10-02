@@ -27,8 +27,8 @@ The PRD leaves several choices open. This document proposes an answer for each o
 | Handler language | TypeScript, run in a WebAssembly (Wasm) sandbox | One language across the stack, and a strong isolation boundary | Accepted (D4) |
 | Table, data, and query extraction | Jackcess (Java) on Linux, cross-checked with mdbtools and a Python reader | Open source, reads `.mdb` and `.accdb`, and needs no Access licence | Proposed, needs spike 1 |
 | Form, report, macro, and VBA extraction | Windows Server worker that drives Microsoft Access with PowerShell | No open source tool found that reads form and report definitions. The owner has run this kind of automation on server operating systems. | Accepted risk (D1, D2). Spike 1 measures stability. |
-| AI model for translation | A private model hosted by the organisation, behind a provider interface | VBA source can contain credentials and business rules, so it stays inside the network | Accepted (D9). Spike 4 tests it. |
-| Hosting | Kubernetes, with Linux node pools, a GPU node pool for the model, and either a Windows node pool or external Windows VMs for the worker | The owner requires deployment on Kubernetes | Accepted (D14). Placement of the Windows worker depends on Spike 1. |
+| AI model for translation | A private model hosted by the organisation, behind a provider interface, on CPU nodes in the cluster unless Spike 4 shows that a GPU server is needed | VBA source can contain credentials and business rules, so it stays inside the network. The cluster has no GPU nodes. | Accepted (D9). Hosting proposed (D18). Spike 4 tests it. |
+| Hosting | RKE2 Kubernetes with Calico, Linux node pools, and a Windows node pool for the worker. The model runs on CPU nodes, or on an external GPU server. | The owner requires deployment on Kubernetes, and the platform is known (D16) | Accepted (D14, D16). Placement of the Windows worker depends on Spike 1. |
 
 ## Goals and constraints
 
@@ -297,7 +297,7 @@ A survey of 2026 sources suggests that a local model is feasible, but the qualit
 - Open-weight code models in the 14 billion to 30 billion parameter range are the practical target. One study found that 7 billion parameter models failed to produce compilable output for API-aware translation, while a 14 billion parameter model reached a compile rate of about 46%. The study did not translate VBA, so the figure is only an indication.
 - Candidates include the Qwen3-Coder family, which is released under the Apache 2.0 licence. A 30 billion parameter mixture-of-experts version has only 3 billion active parameters, and an 80 billion parameter version (Qwen3-Coder-Next) needs about 46 GB of memory, according to the sources. The team must confirm the licence and availability of any model at the start of Spike 4.
 - At 4-bit quantisation, a model needs about half a byte of memory for each parameter, plus 4 to 8 GB for the attention cache at a 32,000-token context. A 32 billion parameter model therefore needs about 20 GB, so a single 24 GB GPU suits models up to about 30 billion parameters with a short context.
-- vLLM suits production serving with several concurrent requests. Ollama and llama.cpp are simpler and suit the spike. Translation is a batch task with a human reviewer, so throughput and response time matter less than accuracy.
+- vLLM suits production serving on GPUs with several concurrent requests. Ollama and llama.cpp are simpler, and llama.cpp also serves models on CPU, which the cluster requires. Translation is a batch task with a human reviewer, so throughput and response time matter less than accuracy.
 - Studies report that supplying the domain model (entities and fields) and similar worked examples improves results. The request format in stage 4 already includes the entity and field definitions, and the pipeline adds retrieved examples of approved translations.
 
 The pipeline compensates for a weaker model in these ways:
@@ -493,6 +493,18 @@ Table 8 lists the main threats and how the design addresses them.
 
 The system deploys on Kubernetes (decision D14). Kubernetes provides scheduling, scaling, rolling updates, and self-healing for the stateless Linux services. Two components do not fit as cleanly: the Windows worker, because Access runs only on Windows, and the translation model, because it needs a GPU.
 
+### Cluster platform
+
+The platform team confirmed these facts (decisions D16 and D17):
+
+- The cluster runs RKE2, at the latest release. Record the exact version at the start of the spikes.
+- The cluster offers Windows nodes and has no GPU nodes.
+- Calico provides the network plugin and network policy.
+- PostgreSQL runs as its own container in the cluster.
+- Object storage is S3-compatible.
+- Passwordstate is the secrets repository.
+- The container registry is an on-premises ProGet server.
+
 ### Workloads
 
 Table 9 lists each component with its Kubernetes workload, node pool, and scaling method.
@@ -507,32 +519,37 @@ Table 9 lists each component with its Kubernetes workload, node pool, and scalin
 | Upload service | Deployment | Linux | Autoscale |
 | Review, edit, and publish service | Deployment | Linux | At least two replicas |
 | Extractor workers, analyser and converter, VBA pipeline | Job for each import, or a Deployment that reads a queue | Linux | Scale on queue depth |
-| Translation model | Deployment with a GPU resource request | GPU | One replica for each GPU, scaled by hand in version 1 |
+| Translation model | Deployment on a high-memory CPU node pool, or an external GPU server behind the same interface | Linux (high memory) | One replica for each model instance, scaled by hand in version 1 |
 | Windows worker | Job for each import | Windows, or outside the cluster | Scale on queue depth, limited by the number of Windows nodes |
 | Connection pooler | Deployment | Linux | At least two replicas |
-| PostgreSQL | Managed service, or a StatefulSet run by an operator | Linux with fast storage | One primary and at least one replica |
-| Object storage | S3-compatible service | Not applicable | Not applicable |
+| PostgreSQL | StatefulSet in the cluster, managed by an operator | Linux with fast storage | One primary and at least one replica |
+| Object storage | S3-compatible service provided by the organisation | Not applicable | Not applicable |
 
 ### Windows worker placement
 
 The worker takes import jobs from a queue and writes the exported text to object storage. Because this interface does not depend on where the worker runs, two placements are possible with no other change:
 
-- **Windows node pool in the cluster.** The worker runs as a Kubernetes Job, scheduled by taints and node selectors. For process isolation, the container image build must match the node's Windows build. Windows pods cannot run privileged. Hyper-V isolation through a runtime class would give a VM-like boundary, but the survey found only older sources, which described that work as slow, so its status is unverified. Spike 1 tests it.
+- **Windows node pool in the cluster.** RKE2 supports Windows worker nodes with Calico, and the organisation's cluster offers them (decision D16). The worker runs as a Kubernetes Job, scheduled by taints and node selectors. RKE2 documents Windows Server 2019 LTSC and 2022 LTSC as validated versions, so confirm that the nodes run one of these. For process isolation, the container image build must match the node's Windows build. Windows pods cannot run privileged. Hyper-V isolation through a runtime class would give a VM-like boundary, but the survey found only older sources, which described that work as slow, so its status is unverified. Spike 1 tests it.
 - **External Windows VM pool.** The worker runs outside the cluster and reads the same queue. This placement keeps the VM isolation of the original design, and removes any dependence on Windows support in the cluster.
 
 The design builds to the queue interface and chooses the placement after Spike 1 (decision D15). A process-isolated Windows container shares the host kernel, which is a weaker boundary for untrusted files. Do not use it unless the security owner accepts the risk.
 
 ### Translation model placement
 
-The model runs on a GPU node pool with the GPU device plugin installed. Model weights load from object storage or a persistent volume at start-up, which can take minutes, so the readiness probe must wait for the load. Only the VBA pipeline pods can call the model, and the model pod has no outbound network access.
+The cluster has no GPU nodes, so the model runs on CPU. The design offers two placements behind one interface:
+
+- **High-memory CPU node pool in the cluster.** The model runs under llama.cpp or a similar CPU server. A mixture-of-experts model with about 3 billion active parameters is the practical choice, because CPU speed depends on how many bytes the CPU reads for each token. Sources report about 8 to 15 tokens per second for such a model on consumer CPUs at 4-bit quantisation. A dense 14 billion parameter model reads about five times as much memory for each token and runs slower. The sources did not test server CPUs, so Spike 4 measures the speed. Translation is a batch task with a human reviewer, so these speeds can be acceptable.
+- **External GPU server.** If Spike 4 shows that CPU speed or quality is not enough, the model runs on a GPU server outside the cluster. This needs a budget decision (open item O5).
+
+Model weights load from object storage or a persistent volume at start-up, which can take minutes, so the readiness probe must wait for the load. Only the VBA pipeline pods can call the model, and the model pod has no outbound network access.
 
 ### Packaging and configuration
 
 The deployment uses these conventions:
 
-- Every Linux component is a container image, built reproducibly, scanned for vulnerabilities, and stored in the organisation's registry.
+- Every Linux component is a container image, built reproducibly, scanned for vulnerabilities, and stored in the organisation's ProGet registry. ProGet supports Windows containers, but Windows base image layers are marked as non-distributable and are skipped on push, so mirroring them to ProGet needs a check. Spike 1 tests pulling the Windows worker image through ProGet.
 - A Helm chart installs the workloads, services, ingress, network policies, autoscalers, and disruption budgets. Values files hold the settings for each environment.
-- Configuration lives in ConfigMaps. Secrets come from the organisation's secrets store, through Kubernetes Secrets or an external secrets operator, and never appear in images or application definitions.
+- Configuration lives in ConfigMaps. Secrets come from Passwordstate and never appear in images or application definitions. A search found an External Secrets Operator provider for BeyondTrust Password Safe, which is a different product, and found none for Passwordstate. The proposal is a small synchronisation Job that reads Passwordstate through its API and writes Kubernetes Secrets, unless the platform team knows a supported integration (open item O11). Kubernetes Secrets are stored in etcd, so the cluster must encrypt secrets at rest.
 - Separate namespaces hold the platform services, the import workers, and the model.
 
 ### Networking and security
@@ -542,7 +559,7 @@ The deployment applies these controls:
 - Network policies deny all traffic by default, and each workload has an allow-list.
 - The extractor, the VBA pipeline, the handler sandbox, and the model have no outbound network access.
 - Linux pods run as a non-root user, with a read-only root file system, no privilege escalation, and the restricted pod security profile.
-- Whether the cluster's network plugin enforces policies on Windows nodes is unverified. Spike 1 tests it.
+- The cluster uses Calico, which RKE2 supports on Windows nodes and requires for network policy there. Windows networking has limits, so Spike 1 still tests that a Windows pod has no outbound access.
 - An ingress controller or gateway terminates TLS. The portal and users reach `/apps/{slug}` through it.
 - Each application's database role has its credentials in a separate secret.
 
@@ -555,7 +572,7 @@ The deployment supports these operating needs:
 - **Permission cache invalidation.** All runtime pods receive invalidation events through a shared channel. The design uses PostgreSQL `LISTEN` and `NOTIFY` (decision D15).
 - **Queue.** A PostgreSQL-backed job queue limits the number of components (decision D15).
 - **Observability.** Structured logs to standard output, metrics in Prometheus format, and traces through OpenTelemetry. The audit store stays separate from operational logs.
-- **Schema snapshots.** Before a destructive change, a Job exports the application's schema to object storage. Database backups remain the responsibility of the platform, and the quarterly restore test still applies.
+- **Schema snapshots.** Before a destructive change, a Job exports the application's schema to object storage. Because PostgreSQL runs in the cluster, the database operator takes backups to the S3-compatible object storage, and the quarterly restore test still applies.
 
 ### What the design does not assume
 
@@ -614,11 +631,15 @@ The [decisions log](DECISIONS.md) holds the open items, their owners, and the po
 - How does a re-import (FR-12) merge changes with an owner's edits to the definition?
 - Can the VBA extraction method for `.accdb` files, which avoids Access, be made reliable?
 - Does the organisation's licensing cover Access on a Windows Server worker pool?
-- Which Kubernetes platform and version does the organisation run, and does it offer Windows nodes, GPU nodes, a network policy engine, and an ingress controller?
+- Which storage class backs the PostgreSQL volumes, and which PostgreSQL operator or backup method does the platform team prefer?
+- How do pods receive secrets from Passwordstate?
+- Can Windows nodes pull base images from the internet, or must ProGet host them, and which Windows Server version do the nodes run?
 
 ## Risks
 
-- The cluster might not offer Windows nodes, GPU nodes, or network policy enforcement on Windows. The queue interface lets the worker and the model run outside the cluster, but that adds components to operate.
+- The cluster has no GPU nodes, so the model runs on CPU. If CPU speed or quality is too low, the model needs an external GPU server, which adds cost and a component to operate. The queue and provider interfaces keep that change small.
+- PostgreSQL runs in the cluster, so the platform team owns its availability, backups, and upgrades. A failure here affects every application and the audit store, so the operator choice and the restore test are critical.
+- Passwordstate has no confirmed Kubernetes integration, so the secrets path is custom. A faulty synchronisation job could leave pods with stale or missing credentials.
 - The automation tier might not meet cost, licence, or security requirements, and Microsoft does not support unattended Automation of Office. Access can hang, so the design assumes failures and limits each job. Spike 1 tests this first.
 - The runtime must support every control and rule type. A gap shows up as a conversion failure for owners, so the conversion corpus must cover the controls in use.
 - Jet SQL has many edge cases. Query translation could take longer than planned, and the fallback is to mark queries as not converted.

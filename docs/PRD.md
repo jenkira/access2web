@@ -277,7 +277,7 @@ Table 5 lists the measures that show whether the product meets its goals.
 - The systems portal exposes an API or integration point for registering applications and reading user identity.
 - A directory service, such as Microsoft Entra ID or LDAP, provides users and groups.
 - PostgreSQL is the target database engine (decision D3 in the [decisions log](DECISIONS.md)).
-- The organisation provides a Kubernetes cluster with an ingress controller and persistent storage. Windows nodes and GPU nodes are available, or the Windows worker and the translation model can run outside the cluster.
+- The organisation provides an RKE2 Kubernetes cluster with Calico network policy, an ingress controller, persistent storage, and Windows nodes. The cluster has no GPU nodes. PostgreSQL runs as a container in the cluster, object storage is S3-compatible, Passwordstate holds secrets, and an on-premises ProGet server holds container images.
 - Source Access files are not password-protected, or the owner supplies the password at upload.
 
 ## Risks
@@ -295,7 +295,7 @@ Table 6 lists the main risks and how to reduce them.
 | Uploaded files contain malware | System compromise | Scan files, parse them in a sandbox, and never run embedded code |
 | Sensitive data is copied into a less controlled place | Privacy breach | Classify data at upload, and require explicit permission settings before publish |
 | Owners publish with permissive settings | Unintended exposure | Deny by default, and show a permissions summary at publish |
-| The cluster has no Windows or GPU nodes | The Windows worker or the translation model cannot run in the cluster | Run them outside the cluster behind the same queue and storage interfaces |
+| The cluster has no GPU nodes | The translation model is slower or less accurate on CPU | Prefer a mixture-of-experts model, measure speed and quality in Spike 4, and fall back to an external GPU server if needed |
 | An edit breaks a live application | Users lose work or access | Edit in drafts, validate before publication, keep version history, and allow rollback |
 | A destructive data change loses data | Permanent loss of records | Preview affected rows, require confirmation, and take a snapshot before applying |
 | Several designers change one application | Conflicting or lost edits | Allow one active draft for each application |
@@ -308,8 +308,8 @@ The [decisions log](DECISIONS.md) records decisions and open items. The items th
 - Where must data live, and does any source database hold personal or health information that needs a privacy review?
 - Who maintains handlers after publication, and who owns an application when its author leaves?
 - Which three to five real databases do the pilot and the spikes use?
-- Is a GPU node or server available to host the translation model, and what is the budget?
-- Which Kubernetes platform and version does the organisation run, and how does it provide PostgreSQL, object storage, a secrets store, and a container registry?
+- Is a high-memory CPU node available to host the translation model, or must the organisation fund an external GPU server, and what is the budget?
+- Which storage class and backup method does the platform team use for PostgreSQL, and how do pods receive secrets from Passwordstate?
 - When the web version goes live, do users stop using the `.accdb` file, and how does the system prevent two diverging copies of the data?
 - How does the system handle tables linked to SQL Server or other ODBC sources, and tables linked from a back-end file in a split database?
 - Who writes row-level rules for each application, and how?
