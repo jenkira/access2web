@@ -25,7 +25,8 @@ The PRD leaves several choices open. This document proposes an answer for each o
 | Database engine | PostgreSQL 16 | Row-level security, schemas, and generated columns match the access-control model | Proposed |
 | Sign-in standard | OpenID Connect (OIDC) | Widely supported by portals and directory services | Proposed, depends on the portal |
 | Handler language | TypeScript, run in a WebAssembly (Wasm) sandbox | One language across the stack, and a strong isolation boundary | Proposed |
-| Form and report extraction | Windows worker with Microsoft Access automation | The form and report layout format is not documented, so native parsing is unreliable | Proposed, needs spike 1 |
+| Table, data, and query extraction | Jackcess (Java) on Linux, cross-checked with mdbtools and a Python reader | Open source, reads `.mdb` and `.accdb`, and needs no Access licence | Proposed, needs spike 1 |
+| Form, report, macro, and VBA extraction | Windows Server worker that drives Microsoft Access with PowerShell | No open source tool found that reads form and report definitions. The owner has run this kind of automation on server operating systems. | Proposed, needs spike 1 |
 | AI service for translation | Provider interface, with a private deployment option | The organisation might not allow VBA source to leave its network | Open |
 | Hosting | Containers on the organisation's platform, with a small Windows worker pool | Matches existing operations | Proposed |
 
@@ -99,7 +100,7 @@ Table 2 lists each component and its responsibility.
 |---|---|
 | Upload service | Receives files, checks size and type, scans for malware, and stores the file in object storage |
 | Extractor workers | Read tables, data, relationships, indexes, and saved queries from the file without Access |
-| Windows worker pool | Export forms, reports, macros, and VBA source as text by using Access automation in a disposable virtual machine (VM) |
+| Windows worker pool | Export forms, reports, macros, and VBA source as text by using Access automation in a disposable environment |
 | Analyser and converter | Builds the application definition, migrates data, and produces the conversion report |
 | VBA pipeline | Classifies procedures, applies fixed mappings, and calls the translation service |
 | Review and publish service | Shows the conversion report and handler reviews, records approvals, and registers the application with the portal |
@@ -162,28 +163,53 @@ The cost of the chosen design is that the runtime must support every control and
 
 ### Two-tier extraction
 
-Access files do not document the format for forms, reports, and VBA, so the system uses two tiers:
+The Access file format is not publicly documented, and the open source tools differ in what they read. The system therefore uses two tiers:
 
-1. **Native tier.** A library such as Jackcess reads tables, data, relationships, indexes, and saved query SQL from `.accdb` and `.mdb` files on Linux. No Access licence is needed.
-2. **Automation tier.** A Windows worker opens the file in Microsoft Access and exports forms, reports, macros, and modules as text by using the `SaveAsText` method. The exported text is the input to the converter.
+1. **Native tier.** Open source libraries read tables, data, relationships, indexes, and saved query SQL on Linux. No Access licence is needed.
+2. **Automation tier.** A Windows Server worker opens the file in Microsoft Access and exports forms, reports, macros, and modules as text by using the `SaveAsText` method. The exported text is the input to the converter.
 
-No one has verified that this combination covers every Access version and feature the organisation uses. Spike 1 must test it on real files before the design is final. If the automation tier is not acceptable, for example because of licensing cost, the system loses form, report, and VBA conversion, and the PRD scope must change.
+Table 3 lists the open source tools that apply to the native tier.
+
+**Table 3. Open source tools for the native tier**
+
+| Tool | Language | Reads | Limits |
+|---|---|---|---|
+| [Jackcess](https://jackcess.sourceforge.io/) | Java | Tables, data, relationships, indexes, read-only query information, passwords, and complex types, for `.mdb` and `.accdb` from Access 2000 to 2019 | Does not read form, report, or VBA definitions |
+| [UCanAccess](https://ucanaccess.sourceforge.net/site.html) | Java | Everything Jackcess reads, with a JDBC interface and SQL execution through HSQLDB | SQL runs in HSQLDB, so results can differ from Access. Useful as a test aid, not as the source of truth. |
+| [mdbtools](https://github.com/mdbtools/mdbtools) | C | Tables, data, schema, properties, and saved query SQL, for `.mdb` and `.accdb` | Small SQL subset. Use as a cross-check on Jackcess. |
+| [access-parser](https://pypi.org/project/access-parser) | Python | Tables and data | No encryption support, and it parses the whole file into memory |
+| pyaccdb | Python | Tables and data, including password-protected files with Agile Encryption | Read-only, and it is not a SQL engine |
+
+The primary choice is Jackcess, because it has the widest coverage and an active release history. The other tools are cross-checks and test aids. The survey found no open source tool that reads form or report definitions, so the automation tier remains necessary for forms and reports.
+
+The VBA position is less clear. Public write-ups describe compressed VBA streams inside `.accdb` files that a tool can detect and decompress, which could remove the need for Access for VBA source. No maintained tool was found, and the survey did not verify the method. Spike 1 includes a time-boxed attempt, because success would make VBA extraction possible on Linux.
+
+### Automation tier on Windows Server
+
+The owner has automated Access with PowerShell on server operating systems, and the worker builds on that experience. Two constraints remain:
+
+- Microsoft does not support unattended Automation of Office applications, and states that Office can be unstable or deadlock in that setting. The Access Runtime and the Database Engine Redistributable count as Office components. See [Considerations for server-side Automation of Office](https://support.microsoft.com/help/257757).
+- Microsoft states that using server-side Automation to provide Office functionality to unlicensed workstations is not covered by the end user licence agreement. The organisation must confirm that its licensing covers this use.
+
+The worker design must therefore assume that Access can hang or crash. It must apply a time limit to each job, kill the process on timeout, and restart the environment between jobs. Spike 1 measures how often failures occur.
+
+No one has verified that the two tiers together cover every Access version and feature the organisation uses. Spike 1 must test them on real files before the design is final. If the organisation cannot accept the automation tier, the system loses form, report, and VBA conversion unless the native VBA method works, and the PRD scope must change.
 
 ### Isolation of the Windows worker
 
 Opening an untrusted file in Access is a risk, so the worker pool applies these controls:
 
-- Each job runs in a fresh VM that is destroyed after the job.
-- The VM has no network access, and no credentials.
+- Each job runs in a fresh, disposable environment that is destroyed after the job. The environment is a VM, or a Hyper-V-isolated Windows container if Spike 1 shows that it is acceptable.
+- The environment has no network access, and no credentials.
 - The worker sets the automation security level to force-disable macros before opening the file, so no `AutoExec` macro or VBA runs.
 - The worker enforces a time limit and a memory limit for each job.
-- The worker copies only the exported text out of the VM.
+- The worker copies only the exported text out of the environment.
 
 ### Data migration
 
-The converter creates one PostgreSQL schema for each application, and loads rows in batches. Table 3 lists the type mapping.
+The converter creates one PostgreSQL schema for each application, and loads rows in batches. Table 4 lists the type mapping.
 
-**Table 3. Access to PostgreSQL type mapping**
+**Table 4. Access to PostgreSQL type mapping**
 
 | Access type | PostgreSQL type | Note |
 |---|---|---|
@@ -329,9 +355,9 @@ The audit store has these properties:
 
 ## Platform data model
 
-Table 4 lists the main tables in the control database.
+Table 5 lists the main tables in the control database.
 
-**Table 4. Control database tables**
+**Table 5. Control database tables**
 
 | Table | Purpose | Key columns |
 |---|---|---|
@@ -344,9 +370,9 @@ Table 4 lists the main tables in the control database.
 
 ## API outline
 
-Table 5 lists the main API groups.
+Table 6 lists the main API groups.
 
-**Table 5. API groups**
+**Table 6. API groups**
 
 | Group | Example operations | Caller |
 |---|---|---|
@@ -360,14 +386,14 @@ Runtime routes use the form `/api/apps/{slug}/...`. Every response for a denied 
 
 ## Threats and mitigations
 
-Table 6 lists the main threats and how the design addresses them.
+Table 7 lists the main threats and how the design addresses them.
 
-**Table 6. Threats and mitigations**
+**Table 7. Threats and mitigations**
 
 | Threat | Mitigation |
 |---|---|
-| Uploaded file carries malware | Scan on upload, and open files only in disposable VMs or in a parser with no network |
-| Embedded macro runs when Access opens the file | Force-disable automation security, and run in a VM that is destroyed after the job |
+| Uploaded file carries malware | Scan on upload, and open files only in disposable environments or in a parser with no network |
+| Embedded macro runs when Access opens the file | Force-disable automation security, and run in an environment that is destroyed after the job |
 | Generated handler leaks or destroys data | Sandbox, restricted host interface, time and memory limits, owner review |
 | SQL injection through translated queries or handlers | Bind all parameters, and reject string-built SQL in generated code |
 | User reads another application's data | One schema and one database role for each application, plus RLS |
@@ -377,9 +403,9 @@ Table 6 lists the main threats and how the design addresses them.
 
 ## Non-functional design
 
-Table 7 shows how the design meets the PRD's non-functional requirements.
+Table 8 shows how the design meets the PRD's non-functional requirements.
 
-**Table 7. Non-functional requirements and design response**
+**Table 8. Non-functional requirements and design response**
 
 | Requirement | Design response |
 |---|---|
@@ -398,14 +424,14 @@ The test plan has these parts:
 - **Permission matrix tests.** Automated tests for each role, resource, and level, including the cases that must deny.
 - **Runtime component tests.** Each control and rule type has tests on its own.
 - **Sandbox escape tests.** A suite of hostile handlers that try to reach the network, file system, and other schemas.
-- **Load tests.** Run against the targets in Table 7.
+- **Load tests.** Run against the targets in Table 8.
 - **Security review.** A penetration test before the first production release.
 
 ## Delivery plan
 
-Work follows the phases in the PRD. Three spikes come first, because they test the assumptions that carry the most risk. Table 8 lists them.
+Work follows the phases in the PRD. Three spikes come first, because they test the assumptions that carry the most risk. Table 9 lists them.
 
-**Table 8. Spikes**
+**Table 9. Spikes**
 
 | Spike | Question | Pass condition |
 |---|---|---|
@@ -413,12 +439,13 @@ Work follows the phases in the PRD. Three spikes come first, because they test t
 | 2. Query translation | Can a Jet SQL transpiler convert the organisation's queries? | At least 80% of queries in the same databases convert and return matching results |
 | 3. Handler sandbox | Can a Wasm sandbox run realistic handlers within limits? | Hostile handlers fail safely, and normal handlers run within 100 ms |
 
-The thresholds in Table 8 are proposals. The owner must set them.
+The thresholds in Table 9 are proposals. The owner must set them.
 
 ## Open questions
 
 - Which portal does the organisation use, and what registration and identity options does it offer?
-- Is licensing Microsoft Access on a Windows worker pool acceptable, and what does it cost?
+- Does the organisation's Microsoft licensing cover running Access on a Windows Server worker pool, and does the security owner accept use that Microsoft does not support?
+- Can the VBA extraction method for `.accdb` files, which avoids Access, be made reliable?
 - Does the organisation need explicit deny grants?
 - Where must data live, and does any application hold data that needs a privacy review?
 - Which translation service is allowed, and does the data policy permit it?
@@ -427,7 +454,7 @@ The thresholds in Table 8 are proposals. The owner must set them.
 
 ## Risks
 
-- The automation tier might not meet cost, licence, or security requirements. Spike 1 tests this first.
+- The automation tier might not meet cost, licence, or security requirements, and Microsoft does not support unattended Automation of Office. Access can hang, so the design assumes failures and limits each job. Spike 1 tests this first.
 - The runtime must support every control and rule type. A gap shows up as a conversion failure for owners, so the conversion corpus must cover the controls in use.
 - Jet SQL has many edge cases. Query translation could take longer than planned, and the fallback is to mark queries as not converted.
 - Owner review of handlers is a human bottleneck. If owners approve without reading, the safeguards fail, so the review screen must show test results and the original code, and the audit log must record every approval.
