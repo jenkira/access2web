@@ -1,8 +1,8 @@
 """Identifier handling. Every identifier in generated SQL passes through here."""
 import re
 
-_IDENT = re.compile(r"^[a-z_][a-z0-9_]{0,62}$")
-SLUG = re.compile(r"^[a-z][a-z0-9_]{1,40}$")
+_IDENT = re.compile(r"^[a-z_][a-z0-9_]{0,62}\Z")  # \Z, because $ also matches before a trailing newline
+SLUG = re.compile(r"^[a-z][a-z0-9_]{1,40}\Z")
 
 
 def normalise(source: str, used: set[str], prefix: str = "x") -> str:

@@ -14,7 +14,7 @@ from .expr import ExprError, evaluate, refs, truthy
 
 CONTROL_TYPES = {"text", "number", "date", "checkbox", "textarea", "combo", "label", "button", "subform"}
 BOUND_TYPES = {"text", "number", "date", "checkbox", "textarea", "combo"}
-_CONTROL_ID = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
+_CONTROL_ID = re.compile(r"^[A-Za-z][A-Za-z0-9_]*\Z")
 
 
 def all_controls(form: Mapping[str, Any]) -> Iterator[Mapping[str, Any]]:
@@ -71,6 +71,57 @@ def unknown_fields(form: Mapping[str, Any], record: Mapping[str, Any]) -> list[s
     return [k for k in record if k not in bound]
 
 
+def _is_str_list(v: Any) -> bool:
+    return isinstance(v, list) and all(isinstance(x, str) for x in v)
+
+
+def _shape_problems(form: Any) -> list[str]:
+    """Why a form cannot even be read: a missing or wrongly typed part. Checked before anything else looks inside the form.
+
+    Form JSON comes from the editor, and from anyone who calls the API, so nothing in it can be assumed. Without this, a
+    form with no rows, or a name that is a list, would raise an error and the person would get a 500 instead of a reason.
+    """
+    if not isinstance(form, dict):
+        return ["a form must be an object"]
+    name = form.get("name")
+    where = f"form {name}" if isinstance(name, str) else "a form"
+    out: list[str] = []
+    if not isinstance(name, str) or not name.strip():
+        out.append(f"{where}: name must be text")
+    if not isinstance(form.get("entity"), str):
+        out.append(f"{where}: entity must be text")
+    rows = form.get("rows")
+    if not isinstance(rows, list):
+        return out + [f"{where}: rows must be a list"]
+    for r, row in enumerate(rows):
+        if not isinstance(row, dict) or not isinstance(row.get("controls"), list):
+            out.append(f"{where}: row {r + 1} must have a list of controls")
+            continue
+        for c, ctl in enumerate(row["controls"]):
+            at = f"{where}: control {c + 1} of row {r + 1}"
+            if not isinstance(ctl, dict):
+                out.append(f"{at} must be an object")
+                continue
+            if not isinstance(ctl.get("id"), str):
+                out.append(f"{at}: id must be text")
+            if not isinstance(ctl.get("type"), str):
+                out.append(f"{at}: type must be text")
+            for key in ("label", "text", "bind", "visible", "default"):
+                if key in ctl and ctl[key] is not None and not isinstance(ctl[key], str):
+                    out.append(f"{at}: {key} must be text")
+            rules = ctl.get("validate")
+            if rules is not None and not (isinstance(rules, list) and all(
+                    isinstance(x, dict) and isinstance(x.get("expr", ""), str) for x in rules)):
+                out.append(f"{at}: validate must be a list of rules, each with text for its expression")
+            for key, parts in (("source", ("entity", "value", "display")), ("child", ("entity", "link", "parentKey"))):
+                v = ctl.get(key)
+                if v is not None and not (isinstance(v, dict) and all(isinstance(v.get(x), str) for x in parts if x in v)):
+                    out.append(f"{at}: {key} must be an object whose {', '.join(parts)} are text")
+            if "columns" in ctl and not _is_str_list(ctl["columns"]):
+                out.append(f"{at}: columns must be a list of text")
+    return out
+
+
 def validate_forms(definition: Mapping[str, Any]) -> list[str]:
     """Every problem that would stop a form from working. An empty list means the forms are valid.
 
@@ -85,6 +136,10 @@ def validate_forms(definition: Mapping[str, Any]) -> list[str]:
 
     seen_forms: set[str] = set()
     for form in definition.get("forms", []):
+        bad_shape = _shape_problems(form)
+        if bad_shape:
+            problems.extend(bad_shape)
+            continue
         where = f"form {form.get('name')}"
         if form.get("name") in seen_forms:
             problems.append(f"{where}: duplicate form name")

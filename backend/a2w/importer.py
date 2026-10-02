@@ -74,7 +74,7 @@ class Analysis(BaseModel):
     row_map: dict[str, dict[str, str]]
 
 
-_NUM = re.compile(r"^-?\d+(\.\d+)?$")
+_NUM = re.compile(r"^-?\d+(\.\d+)?\Z")
 
 
 def _default(expr: str | None) -> tuple[Default | None, str | None]:
