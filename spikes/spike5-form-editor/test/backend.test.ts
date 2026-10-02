@@ -266,16 +266,23 @@ test("a second designer is told who holds the draft and cannot take it, but a ma
   const slug = await newApp();
   const dana = await open(editor(slug, "dana"));
   await dana.waitForSelector("form");
+  const renameField = async (page: Page, from: string, to: string) => { await page.selectOption("#rn-field", from); await page.fill("#rn-to", to); await page.click('[data-fk="rn-preview"]'); await page.click('[data-fk="rn-apply"]'); };
+  const fields = (page: Page) => page.locator('[data-fk="rn-field"] option').allInnerTexts();
+  const ops = async (user: string) => ((await draftOf(slug, user)).draft.log as any[]).map((o) => o.t);
   await setLabel(dana, "c_name", "Dana's edit");
-  await draftState(dana, /Draft saved/);
+  await renameField(dana, "email", "mail");
+  await dana.waitForFunction(() => { const s = (window as any).__spike5.saver; return s.state === "saved" && !s.dirty; });
+  assert.deepEqual(await ops("dana"), ["setLabel", "renameField"]);
 
   const dan = await open(editor(slug, "dan"));
   await dan.waitForSelector("#load-error");
   assert.match(await dan.locator("#load-error").innerText(), /dana is editing a draft/);
   assert.equal(await dan.locator("form").count(), 0, "the editor does not open");
-  await dan.click("#take-over");
-  await dan.waitForFunction(() => /dana is editing/.test(document.getElementById("load-error")?.textContent ?? ""));
-  assert.equal((await draftOf(slug, "dana")).draft.log.length, 1, "a designer cannot discard another's draft");
+  // The message on the page is the same before and after a refusal, so wait for the backend's answer itself.
+  const [refused] = await Promise.all([dan.waitForResponse((r) => r.request().method() === "DELETE" && r.url().endsWith(`/api/apps/${slug}/draft`)), dan.click("#take-over")]);
+  assert.equal(refused.status(), 409, "the backend refuses a designer who tries to discard another's draft");
+  assert.match(await dan.locator("#load-error").innerText(), /dana is editing/);
+  assert.deepEqual(await ops("dana"), ["setLabel", "renameField"], "so the field rename is still there");
 
   const olive = await open(editor(slug, "olive"));
   await olive.waitForSelector("#take-over");
@@ -284,11 +291,17 @@ test("a second designer is told who holds the draft and cannot take it, but a ma
   const mine = (await draftOf(slug, "olive")).draft;
   assert.equal(mine.locked_by, "olive"); assert.equal(mine.log.length, 0);
   assert.equal(await olive.locator('label[for="ctl-CustomerForm-c_name"]').innerText(), "Name", "dana's edit is not in the draft");
+  assert.ok((await fields(olive)).includes("email") && !(await fields(olive)).includes("mail"), "nor is her field rename");
 
   await setLabel(dana, "c_email", "Mail");        // dana's page does not know yet
   await draftState(dana, /olive has taken over/);
-  assert.equal((await draftOf(slug, "olive")).draft.log.length, 0, "dana's late edit did not reach olive's draft");
-  assert.equal(await dana.evaluate(() => (window as any).__spike5.saver.dirty), true, "dana's page still counts the edit as unsaved");
+  await renameField(dana, "customer_name", "title");  // a field rename after the lock is lost
+  assert.equal((await draftOf(slug, "olive")).draft.log.length, 0, "dana's late edits did not reach olive's draft");
+  assert.ok((await fields(olive)).includes("customer_name") && !(await fields(olive)).includes("title"));
+  assert.equal(await dana.evaluate(() => (window as any).__spike5.saver.dirty), true, "dana's page still counts the edits as unsaved");
+  assert.equal(await dana.evaluate(() => (window as any).__spike5.editor.history.log.length), 4, "and keeps them on screen");
+  const live = (await api("GET", `/api/apps/${slug}/definition`, who("olive"))).body;
+  assert.ok(live.version === 1 && live.entities[0].fields.some((f: any) => f.name === "email"), "none of it reached the application");
 });
 
 test("a lock that has lapsed can be taken by another designer", async () => {
