@@ -207,25 +207,34 @@ test("an open form from the earlier version is told to reload after a publish", 
   assert.equal(await page.locator('label[for="ctl-CustomerForm-c_name"]').innerText(), "Client");
 });
 
-test("an edit is saved to the server by itself, and the draft comes back after a reload", async () => {
+test("an edit and an entity rename are saved to the server by themselves, and the draft comes back after a reload", async () => {
   const slug = await newApp();
   const page = await open(editor(slug, "dana"));
   await page.waitForSelector("form");
+  const saved = () => page.waitForFunction(() => { const s = (window as any).__spike5.saver; return s.state === "saved" && !s.dirty; });
+  const entities = () => page.locator('[data-fk="en-entity"] option').allInnerTexts();
+  const label = () => page.locator('label[for="ctl-CustomerForm-c_name"]').innerText();
   assert.equal((await draftOf(slug, "dana")).draft.log.length, 0, "the lock was taken when the page opened");
   await setLabel(page, "c_name", "Full name");
-  await draftState(page, /Draft saved/);
-  const saved = (await draftOf(slug, "dana")).draft;
-  assert.equal(saved.mine, true); assert.deepEqual(saved.log.map((o: any) => [o.t, o.id, o.label]), [["setLabel", "c_name", "Full name"]]);
-  assert.equal((await api("GET", `/api/apps/${slug}/definition`, who("olive"))).body.version, 1, "nothing was published");
+  await page.fill("#en-to", "clients"); await page.click('[data-fk="en-preview"]'); await page.click('[data-fk="en-apply"]');
+  await saved();
+  const draft = (await draftOf(slug, "dana")).draft;
+  assert.equal(draft.mine, true);
+  assert.deepEqual(draft.log.map((o: any) => o.t === "setLabel" ? ["setLabel", o.id, o.label] : [o.t, o.from, o.to]), [["setLabel", "c_name", "Full name"], ["renameEntity", "customers", "clients"]]);
+  const live = (await api("GET", `/api/apps/${slug}/definition`, who("olive"))).body;
+  assert.equal(live.version, 1, "nothing was published"); assert.equal(live.entities[0].name, "customers", "and the table is not renamed until it is");
 
   await page.reload(); await page.waitForSelector("form");
-  assert.match(await statusText(page, /Resumed/), /Resumed your saved draft with 1 edit/);
-  assert.equal(await page.locator('label[for="ctl-CustomerForm-c_name"]').innerText(), "Full name");
-  await page.click('[data-fk="undo"]');  // the resumed edit can be undone like any other
-  assert.equal(await page.locator('label[for="ctl-CustomerForm-c_name"]').innerText(), "Name");
-  await draftState(page, /Draft saved/);
-  await page.waitForFunction(() => (window as any).__spike5.saver.state === "saved");
-  assert.equal((await draftOf(slug, "dana")).draft.log.length, 0, "the undo was saved too");
+  assert.match(await statusText(page, /Resumed/), /Resumed your saved draft with 2 edits/);
+  assert.equal(await label(), "Full name"); assert.ok((await entities()).includes("clients") && !(await entities()).includes("customers"));
+  assert.equal(await page.evaluate(() => (window as any).__spike5.editor.history.current.forms[0].entity), "clients", "the form follows the entity");
+
+  await page.click('[data-fk="undo"]');  // the resumed rename can be undone like any other edit, and the label stays
+  assert.ok((await entities()).includes("customers")); assert.equal(await label(), "Full name");
+  await page.click('[data-fk="undo"]');
+  assert.equal(await label(), "Name");
+  await saved();
+  assert.equal((await draftOf(slug, "dana")).draft.log.length, 0, "the undos were saved too");
 });
 
 test("the Save draft button saves now", async () => {
