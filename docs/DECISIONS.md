@@ -36,8 +36,8 @@ Table 1 lists each decision, its status, and its source.
 | D14 | Deploy on Kubernetes, packaged as container images and a Helm chart, with no dependence on one cloud vendor | Accepted | Added on 2 October 2026. The Windows worker and the translation model can run in the cluster or outside it behind the same queue and storage interfaces. |
 | D15 | Accept the proposals in the technical design's Kubernetes section: a PostgreSQL-backed job queue, PostgreSQL `LISTEN` and `NOTIFY` for permission cache invalidation, a Helm chart, secrets from the organisation's store, and the choice of Windows worker placement after Spike 1 | Accepted | Accepted on 2 October 2026. The platform facts arrived later and are in D16 and D17. |
 | D16 | Target platform: RKE2 at the latest release, Calico for the network and network policy, Windows node pools available, and no GPU nodes | Accepted | Confirmed by the platform team on 2 October 2026. Record the exact RKE2 and Windows Server versions when the spikes start. |
-| D17 | PostgreSQL runs as its own container in the cluster. Object storage is S3-compatible. Passwordstate is the secrets repository. The container registry is an on-premises ProGet server. | Accepted | Confirmed by the platform team on 2 October 2026. |
-| D18 | Host the translation model on high-memory CPU nodes in the cluster, using a mixture-of-experts model, and use an external GPU server only if Spike 4 shows it is needed | Proposed | Needs the owner's confirmation. Follows from the lack of GPU nodes. |
+| D17 | PostgreSQL runs as its own container in the cluster. Object storage is S3-compatible. Passwordstate is the secrets repository. The container registry is an on-premises ProGet server. | Accepted | Confirmed by the platform team on 2 October 2026. The External Secrets Operator already syncs Passwordstate secrets into the cluster. |
+| D18 | Host the translation model on high-memory CPU nodes in the cluster, using a mixture-of-experts model, and use an external GPU server only if Spike 4 shows it is needed | Accepted | Accepted on 2 October 2026. Follows from the lack of GPU nodes. |
 
 ## Open items
 
@@ -55,7 +55,7 @@ Table 2 lists the items that still need an answer, who can answer them, and when
 | O6 | Who maintains handlers after publication, and who owns an application when its author leaves? | Application owner | Build starts |
 | O7 | How does a re-import (FR-12) merge changes with an owner's edits to the definition? Decision D12 removes the need to merge for edited applications, so this item applies only to unedited ones. | Design team | FR-12 is built (P2) |
 | O8 | Which storage class backs the PostgreSQL volumes, and which PostgreSQL operator or backup method does the platform team prefer? | Platform team | Design is final |
-| O9 | How do pods receive secrets from Passwordstate: its API through a synchronisation job, or another supported route? Does the cluster encrypt Kubernetes Secrets at rest? | Platform team | Design is final |
+| O9 | Does the cluster encrypt Kubernetes Secrets at rest? The External Secrets Operator writes Passwordstate secrets into them. | Platform team | Design is final |
 | O10 | Can Windows nodes pull base images from the internet, or must ProGet host them? Which Windows Server version do the nodes run? | Platform team | Spike 1 starts |
 
 ## Gaps found in review

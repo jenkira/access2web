@@ -27,7 +27,7 @@ The PRD leaves several choices open. This document proposes an answer for each o
 | Handler language | TypeScript, run in a WebAssembly (Wasm) sandbox | One language across the stack, and a strong isolation boundary | Accepted (D4) |
 | Table, data, and query extraction | Jackcess (Java) on Linux, cross-checked with mdbtools and a Python reader | Open source, reads `.mdb` and `.accdb`, and needs no Access licence | Proposed, needs spike 1 |
 | Form, report, macro, and VBA extraction | Windows Server worker that drives Microsoft Access with PowerShell | No open source tool found that reads form and report definitions. The owner has run this kind of automation on server operating systems. | Accepted risk (D1, D2). Spike 1 measures stability. |
-| AI model for translation | A private model hosted by the organisation, behind a provider interface, on CPU nodes in the cluster unless Spike 4 shows that a GPU server is needed | VBA source can contain credentials and business rules, so it stays inside the network. The cluster has no GPU nodes. | Accepted (D9). Hosting proposed (D18). Spike 4 tests it. |
+| AI model for translation | A private model hosted by the organisation, behind a provider interface, on CPU nodes in the cluster unless Spike 4 shows that a GPU server is needed | VBA source can contain credentials and business rules, so it stays inside the network. The cluster has no GPU nodes. | Accepted (D9, D18). Spike 4 tests it. |
 | Hosting | RKE2 Kubernetes with Calico, Linux node pools, and a Windows node pool for the worker. The model runs on CPU nodes, or on an external GPU server. | The owner requires deployment on Kubernetes, and the platform is known (D16) | Accepted (D14, D16). Placement of the Windows worker depends on Spike 1. |
 
 ## Goals and constraints
@@ -549,7 +549,7 @@ The deployment uses these conventions:
 
 - Every Linux component is a container image, built reproducibly, scanned for vulnerabilities, and stored in the organisation's ProGet registry. ProGet supports Windows containers, but Windows base image layers are marked as non-distributable and are skipped on push, so mirroring them to ProGet needs a check. Spike 1 tests pulling the Windows worker image through ProGet.
 - A Helm chart installs the workloads, services, ingress, network policies, autoscalers, and disruption budgets. Values files hold the settings for each environment.
-- Configuration lives in ConfigMaps. Secrets come from Passwordstate and never appear in images or application definitions. A search found an External Secrets Operator provider for BeyondTrust Password Safe, which is a different product, and found none for Passwordstate. The proposal is a small synchronisation Job that reads Passwordstate through its API and writes Kubernetes Secrets, unless the platform team knows a supported integration (open item O11). Kubernetes Secrets are stored in etcd, so the cluster must encrypt secrets at rest.
+- Configuration lives in ConfigMaps. Secrets come from Passwordstate through the External Secrets Operator, which the organisation already runs for that purpose. The operator syncs each secret into a Kubernetes Secret at a set refresh interval, and secrets never appear in images or application definitions. Kubernetes Secrets are stored in etcd, so the cluster must encrypt secrets at rest.
 - Separate namespaces hold the platform services, the import workers, and the model.
 
 ### Networking and security
@@ -632,14 +632,14 @@ The [decisions log](DECISIONS.md) holds the open items, their owners, and the po
 - Can the VBA extraction method for `.accdb` files, which avoids Access, be made reliable?
 - Does the organisation's licensing cover Access on a Windows Server worker pool?
 - Which storage class backs the PostgreSQL volumes, and which PostgreSQL operator or backup method does the platform team prefer?
-- How do pods receive secrets from Passwordstate?
+- Does the cluster encrypt Kubernetes Secrets at rest?
 - Can Windows nodes pull base images from the internet, or must ProGet host them, and which Windows Server version do the nodes run?
 
 ## Risks
 
 - The cluster has no GPU nodes, so the model runs on CPU. If CPU speed or quality is too low, the model needs an external GPU server, which adds cost and a component to operate. The queue and provider interfaces keep that change small.
 - PostgreSQL runs in the cluster, so the platform team owns its availability, backups, and upgrades. A failure here affects every application and the audit store, so the operator choice and the restore test are critical.
-- Passwordstate has no confirmed Kubernetes integration, so the secrets path is custom. A faulty synchronisation job could leave pods with stale or missing credentials.
+- Secrets reach pods through a refresh interval in the External Secrets Operator. A Passwordstate outage or a failed sync leaves pods with the last synced value, and a rotated credential reaches pods only after the next sync. Per-application database credentials must tolerate this delay.
 - The automation tier might not meet cost, licence, or security requirements, and Microsoft does not support unattended Automation of Office. Access can hang, so the design assumes failures and limits each job. Spike 1 tests this first.
 - The runtime must support every control and rule type. A gap shows up as a conversion failure for owners, so the conversion corpus must cover the controls in use.
 - Jet SQL has many edge cases. Query translation could take longer than planned, and the fallback is to mark queries as not converted.

@@ -309,7 +309,7 @@ The [decisions log](DECISIONS.md) records decisions and open items. The items th
 - Who maintains handlers after publication, and who owns an application when its author leaves?
 - Which three to five real databases do the pilot and the spikes use?
 - Is a high-memory CPU node available to host the translation model, or must the organisation fund an external GPU server, and what is the budget?
-- Which storage class and backup method does the platform team use for PostgreSQL, and how do pods receive secrets from Passwordstate?
+- Which storage class and backup method does the platform team use for PostgreSQL, and does the cluster encrypt Kubernetes Secrets at rest?
 - When the web version goes live, do users stop using the `.accdb` file, and how does the system prevent two diverging copies of the data?
 - How does the system handle tables linked to SQL Server or other ODBC sources, and tables linked from a back-end file in a split database?
 - Who writes row-level rules for each application, and how?
