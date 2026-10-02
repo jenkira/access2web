@@ -19,9 +19,11 @@ def db_url():
     from a2w import db
     db.bootstrap(url)
     yield url
+    with psycopg.connect(url) as c:  # roles are cluster-wide, so drop only the ones this database created
+        roles = [f"app_{s}" for (s,) in c.execute("select slug from a2w_control.applications").fetchall()]
     with psycopg.connect(ADMIN_URL, autocommit=True) as c:
         c.execute(f'drop database "{name}" with (force)')
-        for (role,) in c.execute("select rolname from pg_roles where rolname like 'app\\_%'").fetchall():
+        for role in roles:
             c.execute(f'drop role if exists "{role}"')
 
 
