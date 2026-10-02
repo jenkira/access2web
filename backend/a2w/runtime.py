@@ -48,7 +48,10 @@ class Unprocessable(Exception):
 
 
 def load_app(conn, slug: str) -> tuple[dict, Definition]:
-    app = conn.execute("select * from a2w_control.applications where slug = %s and status = 'published'", (slug,)).fetchone()
+    # The share lock lasts until the transaction ends. A new version (publish.republish) takes the row for update, so it
+    # waits for requests in flight, and a request that starts during the change waits and then reads the new version.
+    app = conn.execute("select * from a2w_control.applications where slug = %s and status = 'published' for share",
+                       (slug,)).fetchone()
     if not app:
         raise Denied()
     v = conn.execute("select definition from a2w_control.app_versions where app_id = %s and version = %s",

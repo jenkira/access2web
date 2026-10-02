@@ -6,7 +6,7 @@ import psycopg
 from fastapi import Depends, FastAPI, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from . import authz, db, publish as pub, runtime
+from . import authz, db, migrate, publish as pub, runtime
 from .authz import Identity
 from .importer import Extraction
 from .portal import DevHeaderPortal, PortalAdapter, Tile
@@ -25,6 +25,12 @@ class GrantIn(BaseModel):
 class FormSaveIn(BaseModel):
     version: int  # the version of the form that the browser opened
     values: dict[str, Any]
+
+
+class VersionIn(BaseModel):
+    base_version: int  # the version that the editor started from
+    renames: list[migrate.Rename] = Field(default_factory=list)
+    forms: list[dict[str, Any]] | None = None  # None keeps the current forms
 
 
 class PublishIn(BaseModel):
@@ -137,6 +143,21 @@ def create_app(portal: PortalAdapter | None = None) -> FastAPI:
             raise HTTPException(400, f"Publishing failed and nothing was created: {e.diag.message_primary}")
         portal.register(Tile(body.slug, body.name, body.description, body.icon, ident.user_id, f"/apps/{body.slug}"))
         return out
+
+    @app.post("/api/apps/{slug}/versions")
+    def publish_version(slug: str, body: VersionIn, ident: Identity = Depends(identity)):
+        with db.transaction() as conn:
+            row = conn.execute("select id from a2w_control.applications where slug = %s and status = 'published'", (slug,)).fetchone()
+            if not row or not can_manage(conn, row, ident):
+                raise DENIED
+            try:
+                return pub.republish(conn, slug, ident, base_version=body.base_version, renames=body.renames, forms=body.forms)
+            except pub.Busy as e:
+                raise HTTPException(409, str(e))
+            except pub.PublishError as e:
+                raise HTTPException(400, str(e))
+            except psycopg.Error as e:
+                raise HTTPException(400, f"Publishing failed and nothing was changed: {e.diag.message_primary}")
 
     @app.post("/api/apps/{slug}/unpublish")
     def unpublish(slug: str, ident: Identity = Depends(identity)):

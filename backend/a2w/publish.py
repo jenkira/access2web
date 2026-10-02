@@ -2,16 +2,23 @@
 from psycopg import sql
 from psycopg.types.json import Jsonb
 
-from . import authz, db, ddl, formrules
+import psycopg
+
+from . import authz, db, ddl, formrules, migrate, runtime
 from .definition import ConversionItem, Definition
 from .importer import Analysis, Extraction, analyse, summarise
 from .names import check_slug, schema_for
 
 BATCH = 1000
+LOCK_TIMEOUT = "5s"  # how long a new version waits for requests in flight before it gives up
 
 
 class PublishError(Exception):
     pass
+
+
+class Busy(PublishError):
+    """The application is in use and did not become free in time. Nothing changed, so the caller can try again."""
 
 
 def create_job(conn, owner_id: str, extraction: Extraction) -> tuple[int, Analysis]:
@@ -155,3 +162,62 @@ def publish(conn, job_id: int, who: authz.Identity, *, slug: str, name: str, des
     conn.execute("update a2w_control.import_jobs set status = 'published', app_id = %s where id = %s", (app_id, job_id))
     db.audit(conn, who.user_id, "publish", app=slug, detail={"version": 1, "classification": confirmed_classification})
     return {"app_id": app_id, "slug": slug, "version": 1}
+
+
+def republish(conn, slug: str, who: authz.Identity, *, base_version: int, renames: list[migrate.Rename],
+              forms: list[dict] | None = None) -> dict:
+    """Publish a new version of a published application: carry renames to the data, and replace the forms.
+
+    Everything happens in the caller's transaction, so a failure leaves the application as it was. `forms=None` keeps
+    the current forms, and they are checked against the renamed entities, so a rename that would break a form is
+    refused instead of half applied. Adding and removing fields and entities is not handled here.
+    """
+    # Requests in flight hold a share lock on this row (runtime.load_app). Taking the row for update waits for them,
+    # and new requests wait for this transaction, so no request runs with a definition that does not match the tables.
+    conn.execute(sql.SQL("set local lock_timeout = {}").format(sql.Literal(LOCK_TIMEOUT)))
+    try:
+        app = conn.execute("select * from a2w_control.applications where slug = %s and status = 'published' for update",
+                           (slug,)).fetchone()
+    except psycopg.errors.LockNotAvailable:
+        raise Busy("The application is in use. Try again in a moment.") from None
+    if not app:
+        raise runtime.Denied()
+    if app["current_version"] != base_version:
+        raise runtime.VersionChanged(app["current_version"])
+    old = Definition.model_validate(conn.execute(
+        "select definition from a2w_control.app_versions where app_id = %s and version = %s",
+        (app["id"], app["current_version"])).fetchone()["definition"])
+
+    try:
+        d, statements = migrate.apply(slug, old, renames)
+    except migrate.MigrationError as e:
+        raise PublishError(str(e)) from None
+    if forms is not None:
+        d.forms = list(forms)
+    if not renames and d.forms == old.forms:
+        raise PublishError("nothing to publish: no renames, and the forms are unchanged")
+    problems = formrules.validate_forms(d.model_dump(mode="json"))
+    if problems:
+        shown = "; ".join(problems[:10]) + (f"; and {len(problems) - 10} more" if len(problems) > 10 else "")
+        raise PublishError(f"invalid forms: {shown}")
+
+    try:
+        for stmt in statements:
+            conn.execute(stmt)
+    except psycopg.errors.LockNotAvailable:
+        raise Busy("The application is in use. Try again in a moment.") from None
+    # A grant on a table is stored by the table's name, so it follows an entity rename.
+    for r in renames:
+        if r.kind == "entity":
+            conn.execute("update a2w_control.grants set resource_id = %s "
+                         "where app_id = %s and resource_type = 'table' and resource_id = %s", (r.to, app["id"], r.from_))
+
+    version = app["current_version"] + 1
+    d.version = version
+    conn.execute("insert into a2w_control.app_versions(app_id, version, definition, published_by) values (%s,%s,%s,%s)",
+                 (app["id"], version, Jsonb(d.model_dump(mode="json")), who.user_id))
+    conn.execute("update a2w_control.applications set current_version = %s where id = %s", (version, app["id"]))
+    db.audit(conn, who.user_id, "publish", app=slug, detail={
+        "version": version, "renames": [r.model_dump(by_alias=True, exclude_defaults=True) for r in renames],
+        "forms_changed": d.forms != old.forms})
+    return {"slug": slug, "version": version, "migration": [s_.as_string(conn) for s_ in statements]}
