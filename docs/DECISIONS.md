@@ -34,6 +34,7 @@ Table 1 lists each decision, its status, and its source.
 | D12 | The web application becomes the system of record after the first published edit. Re-import stays available only for applications with no published edits. An owner who wants to re-import an edited application creates a separate application. | Accepted | Proposed in review, accepted 2 October 2026. |
 | D13 | Do not require a second approver to publish a change in version 1, but make the rule configurable for each application | Accepted | Proposed in review, accepted 2 October 2026. Adds FR-32. |
 | D14 | Deploy on Kubernetes, packaged as container images and a Helm chart, with no dependence on one cloud vendor | Accepted | Added on 2 October 2026. The Windows worker and the translation model can run in the cluster or outside it behind the same queue and storage interfaces. |
+| D15 | Accept the proposals in the technical design's Kubernetes section: a PostgreSQL-backed job queue, PostgreSQL `LISTEN` and `NOTIFY` for permission cache invalidation, a Helm chart, secrets from the organisation's store, and the choice of Windows worker placement after Spike 1 | Accepted | Accepted on 2 October 2026. Items O8 and O9 still need the facts about the platform. |
 
 ## Open items
 

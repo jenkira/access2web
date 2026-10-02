@@ -520,7 +520,7 @@ The worker takes import jobs from a queue and writes the exported text to object
 - **Windows node pool in the cluster.** The worker runs as a Kubernetes Job, scheduled by taints and node selectors. For process isolation, the container image build must match the node's Windows build. Windows pods cannot run privileged. Hyper-V isolation through a runtime class would give a VM-like boundary, but the survey found only older sources, which described that work as slow, so its status is unverified. Spike 1 tests it.
 - **External Windows VM pool.** The worker runs outside the cluster and reads the same queue. This placement keeps the VM isolation of the original design, and removes any dependence on Windows support in the cluster.
 
-The design recommends building to the queue interface and choosing the placement after Spike 1. A process-isolated Windows container shares the host kernel, which is a weaker boundary for untrusted files. Do not use it unless the security owner accepts the risk.
+The design builds to the queue interface and chooses the placement after Spike 1 (decision D15). A process-isolated Windows container shares the host kernel, which is a weaker boundary for untrusted files. Do not use it unless the security owner accepts the risk.
 
 ### Translation model placement
 
@@ -552,8 +552,8 @@ The deployment supports these operating needs:
 
 - **Availability.** At least two replicas of each stateless service, spread across nodes and zones, with disruption budgets and readiness and liveness probes.
 - **Rolling upgrades.** Pods from two releases run together during an upgrade, so the runtime must read both the current and the previous definition schema version. Control database migrations run as a pre-upgrade Job and must stay compatible with the previous release.
-- **Permission cache invalidation.** All runtime pods receive invalidation events through a shared channel. The proposal is PostgreSQL `LISTEN` and `NOTIFY`.
-- **Queue.** A PostgreSQL-backed job queue limits the number of components. This is a proposal that needs confirmation.
+- **Permission cache invalidation.** All runtime pods receive invalidation events through a shared channel. The design uses PostgreSQL `LISTEN` and `NOTIFY` (decision D15).
+- **Queue.** A PostgreSQL-backed job queue limits the number of components (decision D15).
 - **Observability.** Structured logs to standard output, metrics in Prometheus format, and traces through OpenTelemetry. The audit store stays separate from operational logs.
 - **Schema snapshots.** Before a destructive change, a Job exports the application's schema to object storage. Database backups remain the responsibility of the platform, and the quarterly restore test still applies.
 
