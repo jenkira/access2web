@@ -98,9 +98,9 @@ The server builds the SQL from the rename. It never accepts SQL from the browser
 
 The forms you send must already use the new names. A rename that leaves a form pointing at the old name is refused with the reason, so a rename is never half applied.
 
-Table 3 lists the answers the route gives.
+Table 2 lists the answers the route gives.
 
-**Table 3. Answers from the versions route**
+**Table 2. Answers from the versions route**
 
 | Status | Meaning |
 |---|---|
@@ -114,9 +114,9 @@ Every request now takes a share lock on the application's row for the length of 
 
 ## Configuration
 
-Table 2 lists the environment variables.
+Table 3 lists the environment variables.
 
-**Table 2. Environment variables**
+**Table 3. Environment variables**
 
 | Variable | Purpose |
 |---|---|
