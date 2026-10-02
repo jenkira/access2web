@@ -99,7 +99,7 @@ For each configuration, check these points:
 - Memory and CPU use for each job.
 - Whether network access blocks fully.
 - Whether a hostile file can reach the host or another job's data. Test with the marker file from Part 1b.
-- In the Kubernetes configuration, whether Calico blocks outbound traffic from a Windows pod, how long a Windows node takes to start when the pool scales up, and whether the Windows worker image can be pulled through ProGet, given that Windows base image layers are non-distributable.
+- In the Kubernetes configuration, whether Calico blocks outbound traffic from a Windows pod, how long a Windows node takes to start when the pool scales up, and whether the Windows nodes pull the worker image from ProGet while fetching the Windows base layers from the Microsoft registry.
 
 A process-isolated container shares the host kernel. For untrusted files this is a weaker boundary than a VM, so the team must not choose it unless the security owner accepts the risk. A Linux container cannot run Access, and running Access under a compatibility layer such as Wine is not a supported approach. Linux containers are suitable for the native tier only.
 
@@ -269,7 +269,7 @@ Can a locally hosted model translate VBA procedures to TypeScript handlers that 
 
 ### Time box
 
-An estimate of 5 working days for one engineer, after Spike 3 delivers its hand-translated handlers. The spike also needs a machine to host the models (open item O5). The cluster has no GPU nodes, so the first choice is a high-memory CPU node.
+An estimate of 5 working days for one engineer, after Spike 3 delivers its hand-translated handlers. The spike also needs a machine to host the models. The cluster has no GPU nodes, so the platform team provisions a high-memory CPU node (decision D20).
 
 ### Method
 
@@ -395,8 +395,8 @@ The spikes cannot start until these items exist:
 
 - Three to five sample databases, nominated by the application owner and copied to a restricted location.
 - The owner's existing PowerShell automation scripts for Access.
-- A Windows Server machine or VM with a licensed copy of Microsoft Access.
-- A high-memory CPU node for Spike 4, or a decision to fund an external GPU server.
+- A Windows Server 2022 machine or VM with a licensed copy of Microsoft Access, to match the cluster's Windows nodes. Confirm that the Access edition installs and runs on Windows Server 2022.
+- A high-memory CPU node for Spike 4, which the platform team provisions (decision D20). The proposed specification is 16 or more cores and 64 GB of memory.
 - Three representative users for the Spike 5 usability session, with half a day each.
 - Someone to confirm the licence and support position for Access on a server or in a container.
 

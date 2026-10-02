@@ -35,9 +35,11 @@ Table 1 lists each decision, its status, and its source.
 | D13 | Do not require a second approver to publish a change in version 1, but make the rule configurable for each application | Accepted | Proposed in review, accepted 2 October 2026. Adds FR-32. |
 | D14 | Deploy on Kubernetes, packaged as container images and a Helm chart, with no dependence on one cloud vendor | Accepted | Added on 2 October 2026. The Windows worker and the translation model can run in the cluster or outside it behind the same queue and storage interfaces. |
 | D15 | Accept the proposals in the technical design's Kubernetes section: a PostgreSQL-backed job queue, PostgreSQL `LISTEN` and `NOTIFY` for permission cache invalidation, a Helm chart, secrets from the organisation's store, and the choice of Windows worker placement after Spike 1 | Accepted | Accepted on 2 October 2026. The platform facts arrived later and are in D16 and D17. |
-| D16 | Target platform: RKE2 at the latest release, Calico for the network and network policy, Windows node pools available, and no GPU nodes | Accepted | Confirmed by the platform team on 2 October 2026. Record the exact RKE2 and Windows Server versions when the spikes start. |
+| D16 | Target platform: RKE2 at the latest release, Calico for the network and network policy, Windows node pools available, and no GPU nodes | Accepted | Confirmed by the platform team on 2 October 2026. Windows nodes run Windows Server 2022. Record the exact RKE2 version when the spikes start. |
 | D17 | PostgreSQL runs as its own container in the cluster. Object storage is S3-compatible. Passwordstate is the secrets repository. The container registry is an on-premises ProGet server. | Accepted | Confirmed by the platform team on 2 October 2026. The External Secrets Operator already syncs Passwordstate secrets into the cluster. |
 | D18 | Host the translation model on high-memory CPU nodes in the cluster, using a mixture-of-experts model, and use an external GPU server only if Spike 4 shows it is needed | Accepted | Accepted on 2 October 2026. Follows from the lack of GPU nodes. |
+| D19 | Storage for PostgreSQL volumes is NVMe SAN presented through the VMware Kubernetes connector. The cluster encrypts Kubernetes Secrets at rest. Windows nodes run Windows Server 2022 and can pull images from the internet. | Accepted | Confirmed by the platform team on 2 October 2026. |
+| D20 | The platform team provisions a high-memory CPU node to specification for the translation model | Accepted | Confirmed by the platform team on 2 October 2026. Proposed starting specification: 16 or more cores and 64 GB of memory. Spike 4 confirms or revises it. |
 
 ## Open items
 
@@ -51,12 +53,9 @@ Table 2 lists the items that still need an answer, who can answer them, and when
 | O2 | Which three to five databases do the spikes use? Include a heavy-VBA file, a complex-query file, a split database, and both file formats. | Application owner | Spikes start |
 | O3 | Does the organisation's Microsoft licensing cover Access on a Windows Server worker? The owner accepted the support risk, but the licence terms are a separate matter. | Licensing contact | Spikes start |
 | O4 | Where must data live, and does any application hold personal or health information that needs a privacy review? | Privacy officer | Design is final |
-| O5 | Is a high-memory CPU node available for Spike 4 and production, or must the organisation fund an external GPU server? What is the budget? | Platform team | Spike 4 starts |
 | O6 | Who maintains handlers after publication, and who owns an application when its author leaves? | Application owner | Build starts |
 | O7 | How does a re-import (FR-12) merge changes with an owner's edits to the definition? Decision D12 removes the need to merge for edited applications, so this item applies only to unedited ones. | Design team | FR-12 is built (P2) |
-| O8 | Which storage class backs the PostgreSQL volumes, and which PostgreSQL operator or backup method does the platform team prefer? | Platform team | Design is final |
-| O9 | Does the cluster encrypt Kubernetes Secrets at rest? The External Secrets Operator writes Passwordstate secrets into them. | Platform team | Design is final |
-| O10 | Can Windows nodes pull base images from the internet, or must ProGet host them? Which Windows Server version do the nodes run? | Platform team | Spike 1 starts |
+| O8 | Which PostgreSQL operator or backup method does the platform team prefer? Storage is decided in D19. | Platform team | Design is final |
 
 ## Gaps found in review
 
