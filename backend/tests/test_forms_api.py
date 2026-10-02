@@ -197,9 +197,36 @@ def test_a_grant_on_the_form_replaces_the_application_grants_for_that_form(clien
     dan, fay = hdr("dan"), hdr("fay")
     assert save(client, slug, "CustomerForm", {"customer_name": "x"}, who=dan).status_code == 403, "the form grant replaces the application grant"
     assert save(client, slug, "OrderForm", {"customerid": 1, "total": 1}, who=dan).status_code == 201, "other forms still use the application grant"
-    assert save(client, slug, "CustomerForm", {"customer_name": "x"}, who=fay).status_code == 201
+    assert save(client, slug, "CustomerForm", {"customer_name": "x"}, who=fay).status_code == 403, "fay may edit the form but has no access to its table"
     assert save(client, slug, "OrderForm", {"customerid": 1, "total": 1}, who=fay).status_code == 403, "fay has no grant on the other form"
     assert client.get(f"/api/apps/{slug}/tables/customers/records", headers=fay).status_code == 403, "and none on the table"
+
+
+def test_a_form_save_needs_edit_data_on_the_table_as_well_as_on_the_form(client):
+    grants = [grant("fay", "edit_data", "form", "CustomerForm"), grant("fay", "edit_data", "table", "customers"),   # both
+              grant("ron", "edit_data"), grant("ron", "view_data", "table", "customers"),                           # app edit, table read-only
+              grant("tom", "view_data", "form", "OrderForm"), grant("tom", "edit_data", "table", "orders"),         # table edit, form view only
+              grant("bob", "view_data")]
+    slug, _ = publish(client, grants=grants)
+    fay, ron, tom = hdr("fay"), hdr("ron"), hdr("tom")
+    made = save(client, slug, "CustomerForm", {"customer_name": "Fay's"}, who=fay)
+    assert made.status_code == 201, "a grant on the form and a grant on the table together allow the save"
+    assert save(client, slug, "CustomerForm", {"customer_name": "Fay's again"}, who=fay, key=made.json()["customerid"]).status_code == 200
+    assert save(client, slug, "CustomerForm", {"customer_name": "Ron's"}, who=ron).status_code == 403, "a read-only table cannot be written through its form"
+    assert save(client, slug, "CustomerForm", {"customer_name": "Ron's"}, who=ron, key=1).status_code == 403, "nor can a record in it be changed"
+    assert save(client, slug, "OrderForm", {"customerid": 1, "total": 1}, who=ron).status_code == 201, "a table that is not restricted still can"
+    assert save(client, slug, "OrderForm", {"customerid": 1, "total": 1}, who=tom).status_code == 403, "the form grant is still needed"
+    names = [x["customer_name"] for x in client.get(f"/api/apps/{slug}/tables/customers/records", headers=BOB).json()["records"]]
+    assert "Ron's" not in names and "Acme" in names, "nothing was written for ron"
+
+
+def test_a_person_refused_by_the_table_grant_learns_nothing_about_versions_or_fields(client):
+    slug, _ = publish(client, grants=[grant("ron", "edit_data"), grant("ron", "view_data", "table", "customers")])
+    ron = hdr("ron")
+    stale = save(client, slug, "CustomerForm", {"customer_name": "x"}, who=ron, version=0)
+    nonsense = save(client, slug, "CustomerForm", {"no_such_field": 1}, who=ron)
+    assert stale.status_code == 403 and nonsense.status_code == 403
+    assert stale.json() == nonsense.json(), "the same answer for both"
 
 
 def test_the_form_list_shows_only_forms_the_user_may_view(client):

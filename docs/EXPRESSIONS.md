@@ -176,7 +176,7 @@ The backend applies the rules to every save that goes through a form. The routes
 
 Each save is checked in this order, and the first failure stops it:
 
-1. **Permission.** The form exists and the user has edit data on it. A missing form and a forbidden form give the same answer.
+1. **Permission.** The form exists, and the user has edit data on the form and on the table that the form saves to. A missing form, a forbidden form, and a forbidden table give the same answer.
 2. **Version.** The form is from the current version of the application. If not, the answer is 409 with `version_changed`, and the user must reload.
 3. **Unknown fields.** The record holds only fields that a control on the form binds to. If not, the answer is 422 with the field names.
 4. **Rules.** For each visible control that has validation rules, every rule is true. For each visible control whose field is required and not a key, the value is not null or the empty string. If not, the answer is 422 with `{control, message}` for each failure.
@@ -206,7 +206,8 @@ Table 6 shows what the rule covers.
 
 Two consequences to know about:
 
-- **Edit data on the table is not enough.** A grant on the table replaces application grants for that table, but a form is a separate object. A person needs edit data on the form, which an application-level grant gives. A grant on the table alone lets the person read and delete, and no longer lets them write.
+- **A save needs edit data on the form and on the table.** A grant on an object replaces the application grants for that object, so the two are decided separately. An application-level grant gives both. A grant on the table alone lets the person read and delete, and not write. A grant on the form alone does not let the person save either, because they also need the table.
+- **A table can be made read-only for someone.** Give the person edit data on the application and view data on the table. Reading, and any form that saves to a different table, work as before, and a form that saves to the restricted table refuses them.
 - **Delete is not covered.** A delete cannot leave a record that breaks a rule, and there is no form route for it.
 
 ## Changing the language

@@ -206,7 +206,7 @@ Table 5 lists the environment variables.
 - The API stores the extracted metadata, including rows, in the control database. Large databases need object storage, which is not built yet.
 - The container image and the Helm chart were written but not built or linted, because the build environment had no Docker daemon and no Helm.
 - A table without a single-column primary key can be listed and created in, but not edited or deleted from.
-- A table that has a form can be created in and updated only through the form, so edit data on the table alone no longer lets a person write. Deleting is not affected. Editing a form after publish is not built.
+- A table that has a form can be created in and updated only through the form, so edit data on the table alone no longer lets a person write. A save through the form needs edit data on the form and on the table. Deleting is not affected. Editing a form after publish is not built.
 - A new version carries renames and form changes only. Adding or removing a field, an entity, or a relationship needs a design that handles existing data, and is not built.
 - Closing the editor does not release the lock. It lapses after 30 minutes, or a person with manage application can take the draft over. Opening the editor again as the same person resumes the draft at once.
 - The backend cannot replay a draft's edit log, so a corrupt log is found when the editor opens it, not when it is saved.

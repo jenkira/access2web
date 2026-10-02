@@ -201,7 +201,8 @@ def get_definition(conn, slug, ident) -> dict:
 def save_form(conn, slug, ident, form_name, values, *, version: int, key: str | None = None) -> dict:
     """Save a record through a form. Checks run in this order, and a failure stops the save:
 
-    1. The form exists and the user has edit_data on it. Both failures give the same answer.
+    1. The form exists, and the user has edit_data on the form and on the table that the form saves to. Every failure gives
+       the same answer, so a person cannot tell which one it was.
     2. The form is from the current version of the application, or the user must reload.
     3. The record holds only fields that the form binds.
     4. Every rule on a visible control is true, and every visible required field has a value.
@@ -211,7 +212,9 @@ def save_form(conn, slug, ident, form_name, values, *, version: int, key: str | 
     """
     app, d = load_app(conn, slug)
     form = _form(d, form_name)
-    if not authz.can(conn, app["id"], ident, "form", form_name, "edit_data"):
+    # Both must allow it. A grant on the table (to make it read-only for someone, say) must hold when the table has a form.
+    if not (authz.can(conn, app["id"], ident, "form", form_name, "edit_data")
+            and authz.can(conn, app["id"], ident, "table", form["entity"], "edit_data")):
         raise Denied()
     if version != app["current_version"]:
         raise VersionChanged(app["current_version"])
