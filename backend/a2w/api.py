@@ -6,7 +6,7 @@ import psycopg
 from fastapi import Depends, FastAPI, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from . import authz, db, migrate, publish as pub, runtime
+from . import authz, db, drafts, migrate, publish as pub, runtime
 from .authz import Identity
 from .importer import Extraction
 from .portal import DevHeaderPortal, PortalAdapter, Tile
@@ -31,6 +31,10 @@ class VersionIn(BaseModel):
     base_version: int  # the version that the editor started from
     renames: list[migrate.Rename] = Field(default_factory=list)
     forms: list[dict[str, Any]] | None = None  # None keeps the current forms
+
+
+class DraftIn(BaseModel):
+    log: list[dict[str, Any]]  # the editor's operations, stored as the editor wrote them
 
 
 class PublishIn(BaseModel):
@@ -76,6 +80,24 @@ def create_app(portal: PortalAdapter | None = None) -> FastAPI:
     async def _version(_: Request, exc):
         from fastapi.responses import JSONResponse
         return JSONResponse({"error": "version_changed", "current": exc.current}, status_code=409)
+
+    @app.exception_handler(drafts.DraftLocked)
+    async def _draft_locked(_: Request, exc):
+        from fastapi.responses import JSONResponse
+        return JSONResponse({"error": "draft_locked", "locked_by": exc.locked_by, "expires_at": exc.expires_at.isoformat(),
+                             "detail": f"{exc.locked_by} is editing a draft of this application."}, status_code=409)
+
+    @app.exception_handler(drafts.DraftOutOfDate)
+    async def _draft_out_of_date(_: Request, exc):
+        from fastapi.responses import JSONResponse
+        return JSONResponse({"error": "draft_out_of_date", "base": exc.base, "current": exc.current,
+                             "detail": f"The saved draft started from version {exc.base}, and the application is now at version {exc.current}."},
+                            status_code=409)
+
+    @app.exception_handler(drafts.NoDraft)
+    async def _no_draft(_: Request, __):
+        from fastapi.responses import JSONResponse
+        return JSONResponse({"error": "no_draft", "detail": "There is no draft. Take the lock first."}, status_code=409)
 
     @app.exception_handler(runtime.FormRequired)
     async def _form_required(_: Request, exc):
@@ -235,6 +257,30 @@ def create_app(portal: PortalAdapter | None = None) -> FastAPI:
             return {"slug": slug, "name": row["name"], "tables": tables, "forms": forms,
                     "entities": [e.model_dump(mode="json", include={"name", "source_name", "fields", "primary_key"})
                                  for e in d.entities if e.name in tables]}
+
+    # ---- drafts: the editor's saved work, with a lock ----
+    @app.get("/api/apps/{slug}/draft")
+    def draft_view(slug: str, ident: Identity = Depends(identity)):
+        with db.transaction() as conn:
+            return drafts.view(conn, slug, ident)
+
+    @app.post("/api/apps/{slug}/draft/lock")
+    def draft_lock(slug: str, ident: Identity = Depends(identity)):
+        with db.transaction() as conn:
+            return drafts.lock(conn, slug, ident)
+
+    @app.put("/api/apps/{slug}/draft")
+    def draft_save(slug: str, body: DraftIn, ident: Identity = Depends(identity)):
+        try:
+            with db.transaction() as conn:
+                return drafts.save(conn, slug, ident, body.log)
+        except drafts.BadDraft as e:
+            raise HTTPException(400, str(e))
+
+    @app.delete("/api/apps/{slug}/draft")
+    def draft_discard(slug: str, ident: Identity = Depends(identity)):
+        with db.transaction() as conn:
+            return drafts.discard(conn, slug, ident)
 
     @app.get("/api/apps/{slug}/definition")
     def get_definition(slug: str, ident: Identity = Depends(identity)):

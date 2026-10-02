@@ -45,7 +45,7 @@ async function newApp(): Promise<string> {
   const job = (await api("POST", "/api/authoring/import-jobs", OWNER, EXTRACTION)).body.job;
   const r = await api("POST", `/api/authoring/import-jobs/${job}/publish`, OWNER, {
     slug, name: slug, confirmed_classification: "personal", permissions_confirmed: true, forms: FORMS,
-    grants: [grant("dana", "design_application"), grant("ed", "edit_data"), grant("vic", "view_data")] });
+    grants: [grant("dana", "design_application"), grant("dan", "design_application"), grant("mia", "manage_application"), grant("ed", "edit_data"), grant("vic", "view_data")] });
   assert.equal(r.status, 200, JSON.stringify(r.body));
   return slug;
 }
@@ -85,10 +85,13 @@ async function open(path: string): Promise<Page> {
   await page.goto(base + path);
   return page;
 }
-const editor = (slug: string, user: string, form = "CustomerForm") => `/editor/public/index.html?app=${slug}&mode=edit&form=${form}&user=${user}`;
+const editor = (slug: string, user: string, form = "CustomerForm", extra = "") => `/editor/public/index.html?app=${slug}&mode=edit&form=${form}&user=${user}&autosave=100${extra}`;
 const runner = (slug: string, user: string, form = "CustomerForm") => `/editor/public/index.html?app=${slug}&mode=run&form=${form}&user=${user}`;
 const statusText = async (page: Page, re: RegExp) => { await page.waitForFunction((s) => new RegExp(s).test(document.getElementById("status")?.textContent ?? ""), re.source, { timeout: 8000 }); return page.locator("#status").innerText(); };
 const columns = async (slug: string) => (await db.query("select column_name from information_schema.columns where table_schema = $1 and table_name = 'customers'", ["app_" + slug])).rows.map((r) => r.column_name);
+const draftOf = async (slug: string, user: string) => (await api("GET", `/api/apps/${slug}/draft`, who(user))).body;
+const lapse = (slug: string) => db.query("update a2w_control.drafts set expires_at = now() - interval '1 second' where app_id = (select id from a2w_control.applications where slug = $1)", [slug]);
+const draftState = async (page: Page, re: RegExp) => { await page.waitForFunction((s) => new RegExp(s).test(document.getElementById("draft-state")?.textContent ?? ""), re.source, { timeout: 8000 }); return page.locator("#draft-state").innerText(); };
 const setLabel = async (page: Page, id: string, text: string) => { await page.click(`[data-select="${id}"]`); await page.fill("#p-label", text); await page.locator("#p-label").blur(); };
 
 test("the editor page is served by the backend, and loads the application's real forms", async () => {
@@ -97,7 +100,9 @@ test("the editor page is served by the backend, and loads the application's real
   await page.waitForSelector("form");
   assert.deepEqual(await page.locator("#form-select option").allInnerTexts(), ["Customer"]);
   assert.equal(await page.locator('label[for="ctl-CustomerForm-c_name"]').innerText(), "Name");
-  assert.equal(await page.locator('[data-fk="save"]').isDisabled(), true, "there is no saved draft on the server yet");
+  assert.equal(await page.locator('[data-fk="save"]').isDisabled(), false, "the draft is saved on the server");
+  assert.equal(await page.locator('[data-fk="discard"]').count(), 1);
+  assert.match(await page.locator("#draft-state").innerText(), /Draft saved/);
 });
 
 test("Design can edit but the backend refuses a publish, and nothing changes", async () => {
@@ -154,9 +159,14 @@ test("a draft that started from an older version is refused, with the way forwar
   const page = await open(editor(slug, "olive"));
   await page.waitForSelector("form");
   await setLabel(page, "c_name", "Mine");
-  // Someone else publishes first.
+  await draftState(page, /Draft saved/);
+  // The lock stops a second manager from publishing over an active draft.
   const forms = structuredClone(FORMS); forms[0]!.title = "Customer details";
-  assert.equal((await api("POST", `/api/apps/${slug}/versions`, who("olive"), { base_version: 1, forms })).status, 200);
+  const blocked = await api("POST", `/api/apps/${slug}/versions`, who("mia"), { base_version: 1, forms });
+  assert.equal(blocked.status, 409); assert.equal(blocked.body.error, "draft_locked"); assert.equal(blocked.body.locked_by, "olive");
+  // Once the lease has lapsed, they can, and the draft goes with it.
+  await lapse(slug);
+  assert.equal((await api("POST", `/api/apps/${slug}/versions`, who("mia"), { base_version: 1, forms })).status, 200);
   await page.click('[data-fk="publish"]');
   const msg = await statusText(page, /Not published/);
   assert.match(msg, /now at version 2/); assert.match(msg, /Reload the editor/);
@@ -195,4 +205,132 @@ test("an open form from the earlier version is told to reload after a publish", 
   await page.click("#reload"); await page.waitForSelector("form");
   assert.match(await page.locator("body").innerText(), /Form version 2/);
   assert.equal(await page.locator('label[for="ctl-CustomerForm-c_name"]').innerText(), "Client");
+});
+
+test("an edit is saved to the server by itself, and the draft comes back after a reload", async () => {
+  const slug = await newApp();
+  const page = await open(editor(slug, "dana"));
+  await page.waitForSelector("form");
+  assert.equal((await draftOf(slug, "dana")).draft.log.length, 0, "the lock was taken when the page opened");
+  await setLabel(page, "c_name", "Full name");
+  await draftState(page, /Draft saved/);
+  const saved = (await draftOf(slug, "dana")).draft;
+  assert.equal(saved.mine, true); assert.deepEqual(saved.log.map((o: any) => [o.t, o.id, o.label]), [["setLabel", "c_name", "Full name"]]);
+  assert.equal((await api("GET", `/api/apps/${slug}/definition`, who("olive"))).body.version, 1, "nothing was published");
+
+  await page.reload(); await page.waitForSelector("form");
+  assert.match(await statusText(page, /Resumed/), /Resumed your saved draft with 1 edit/);
+  assert.equal(await page.locator('label[for="ctl-CustomerForm-c_name"]').innerText(), "Full name");
+  await page.click('[data-fk="undo"]');  // the resumed edit can be undone like any other
+  assert.equal(await page.locator('label[for="ctl-CustomerForm-c_name"]').innerText(), "Name");
+  await draftState(page, /Draft saved/);
+  await page.waitForFunction(() => (window as any).__spike5.saver.state === "saved");
+  assert.equal((await draftOf(slug, "dana")).draft.log.length, 0, "the undo was saved too");
+});
+
+test("the Save draft button saves now", async () => {
+  const slug = await newApp();
+  const page = await open(editor(slug, "dana", "CustomerForm", "&autosave=60000"));  // no autosave within the test
+  await page.waitForSelector("form");
+  await setLabel(page, "c_name", "Saved by hand");
+  assert.equal((await draftOf(slug, "dana")).draft.log.length, 0, "not saved yet");
+  await page.click('[data-fk="save"]');
+  assert.match(await statusText(page, /Draft saved with 1 edit/), /Draft saved with 1 edit\./);
+  assert.equal((await draftOf(slug, "dana")).draft.log[0].label, "Saved by hand");
+});
+
+test("a second designer is told who holds the draft and cannot take it, but a manager can", async () => {
+  const slug = await newApp();
+  const dana = await open(editor(slug, "dana"));
+  await dana.waitForSelector("form");
+  await setLabel(dana, "c_name", "Dana's edit");
+  await draftState(dana, /Draft saved/);
+
+  const dan = await open(editor(slug, "dan"));
+  await dan.waitForSelector("#load-error");
+  assert.match(await dan.locator("#load-error").innerText(), /dana is editing a draft/);
+  assert.equal(await dan.locator("form").count(), 0, "the editor does not open");
+  await dan.click("#take-over");
+  await dan.waitForFunction(() => /dana is editing/.test(document.getElementById("load-error")?.textContent ?? ""));
+  assert.equal((await draftOf(slug, "dana")).draft.log.length, 1, "a designer cannot discard another's draft");
+
+  const olive = await open(editor(slug, "olive"));
+  await olive.waitForSelector("#take-over");
+  await olive.click("#take-over");
+  await olive.waitForSelector("form");           // the page reloads and now holds the draft
+  const mine = (await draftOf(slug, "olive")).draft;
+  assert.equal(mine.locked_by, "olive"); assert.equal(mine.log.length, 0);
+  assert.equal(await olive.locator('label[for="ctl-CustomerForm-c_name"]').innerText(), "Name", "dana's edit is not in the draft");
+
+  await setLabel(dana, "c_email", "Mail");        // dana's page does not know yet
+  await draftState(dana, /olive has taken over/);
+  assert.equal((await draftOf(slug, "olive")).draft.log.length, 0, "dana's late edit did not reach olive's draft");
+  assert.equal(await dana.evaluate(() => (window as any).__spike5.saver.dirty), true, "dana's page still counts the edit as unsaved");
+});
+
+test("a lock that has lapsed can be taken by another designer", async () => {
+  const slug = await newApp();
+  const dana = await open(editor(slug, "dana"));
+  await dana.waitForSelector("form");
+  await lapse(slug);
+  const dan = await open(editor(slug, "dan"));
+  await dan.waitForSelector("form");
+  assert.equal((await draftOf(slug, "dan")).draft.locked_by, "dan");
+});
+
+test("the page keeps the lock while it is open", async () => {
+  const slug = await newApp();
+  const page = await open(editor(slug, "dana", "CustomerForm", "&heartbeat=300"));
+  await page.waitForSelector("form");
+  await db.query("update a2w_control.drafts set expires_at = now() + interval '5 seconds' where app_id = (select id from a2w_control.applications where slug = $1)", [slug]);
+  await page.waitForTimeout(1200);  // several heartbeats, with no edit
+  const r = await db.query("select expires_at > now() + interval '10 minutes' as long from a2w_control.drafts where app_id = (select id from a2w_control.applications where slug = $1)", [slug]);
+  assert.equal(r.rows[0].long, true);
+});
+
+test("publishing ends the draft, and the page starts the next one from the new version", async () => {
+  const slug = await newApp();
+  const page = await open(editor(slug, "olive"));
+  await page.waitForSelector("form");
+  await setLabel(page, "c_name", "Published name");
+  await page.click('[data-fk="publish"]');
+  await statusText(page, /Published as version 2/);
+  const next = (await draftOf(slug, "olive")).draft;
+  assert.equal(next.mine, true); assert.equal(next.base_version, 2); assert.equal(next.log.length, 0);
+  // Nobody else can publish over the new draft, and an edit goes into it.
+  await setLabel(page, "c_name", "Second name");
+  await draftState(page, /Draft saved/);
+  assert.equal((await draftOf(slug, "olive")).draft.log[0].label, "Second name");
+  const forms = structuredClone(FORMS);
+  assert.equal((await api("POST", `/api/apps/${slug}/versions`, who("mia"), { base_version: 2, forms })).status, 409);
+});
+
+test("Discard draft throws the edits away after a confirmation", async () => {
+  const slug = await newApp();
+  const page = await open(editor(slug, "dana"));
+  await page.waitForSelector("form");
+  await setLabel(page, "c_name", "Gone");
+  await draftState(page, /Draft saved/);
+  page.once("dialog", (d) => d.dismiss());
+  await page.click('[data-fk="discard"]');
+  assert.match(await statusText(page, /Kept your draft/), /Kept your draft/);
+  assert.equal((await draftOf(slug, "dana")).draft.log.length, 1);
+  page.once("dialog", (d) => d.accept());
+  await page.click('[data-fk="discard"]');
+  assert.match(await statusText(page, /Discarded your draft/), /Discarded/);
+  assert.equal(await page.locator('label[for="ctl-CustomerForm-c_name"]').innerText(), "Name");
+  const after = (await draftOf(slug, "dana")).draft;
+  assert.equal(after.mine, true); assert.equal(after.log.length, 0, "a fresh draft, still held by dana");
+});
+
+test("a saved draft that does not replay is not opened, and can be discarded", async () => {
+  const slug = await newApp();
+  assert.equal((await api("POST", `/api/apps/${slug}/draft/lock`, who("dana"))).status, 200);
+  assert.equal((await api("PUT", `/api/apps/${slug}/draft`, who("dana"), { log: [{ t: "setLabel", form: "CustomerForm", id: "no_such_control", label: "x" }] })).status, 200);
+  const page = await open(editor(slug, "dana"));
+  await page.waitForSelector("#load-error");
+  assert.match(await page.locator("#load-error").innerText(), /cannot be replayed/);
+  await page.click("#discard-broken");
+  await page.waitForSelector("form");
+  assert.equal((await draftOf(slug, "dana")).draft.log.length, 0);
 });

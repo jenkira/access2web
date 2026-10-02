@@ -4,7 +4,9 @@ import type { Op } from "../model/ops.ts";
 import { Editor } from "./editor.ts";
 import { h } from "./dom.ts";
 import { renderForm } from "./render.ts";
-import { BackendClient } from "../backend/client.ts";
+import { BackendClient, DraftLockedError, DraftOutOfDateError } from "../backend/client.ts";
+import { DraftSaver } from "../backend/draft.ts";
+import { History } from "../model/history.ts";
 
 const q = new URLSearchParams(location.search);
 const mode = q.get("mode") ?? "run";
@@ -44,19 +46,80 @@ async function runBackend(be: BackendClient) {
   app.replaceChildren(h("p", {}, `Form version ${def.version}. Signed in as ${q.get("user")}.`), banner, view.el, h("p", {}, save), status);
 }
 
+function showProblem(text: string, button?: { label: string; id: string; run: () => Promise<void> }) {
+  const note = h("p", { role: "alert", id: "load-error" }, text);
+  const extra = h("p", { id: "load-error-actions" });
+  if (button) {
+    const b = h("button", { type: "button", id: button.id }, button.label);
+    b.addEventListener("click", async () => { try { await button.run(); location.reload(); } catch (e) { note.textContent = (e as Error).message; } });
+    extra.append(b);
+  }
+  app.replaceChildren(note, extra);
+}
+
+const when = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
 async function editBackend(be: BackendClient) {
+  // The lock comes first: only one person edits a draft, and the draft the server holds is where this page starts.
+  let lock;
+  try { lock = await be.lockDraft(); }
+  catch (e) {
+    if (e instanceof DraftLockedError) {
+      return showProblem(`${e.lockedBy} is editing a draft of this application, and holds it until ${when(e.expiresAt)} unless they stop. You can edit when they publish or discard it.`,
+        { label: "Take over the draft (discards their edits)", id: "take-over", run: () => be.discardDraft() });
+    }
+    if (e instanceof DraftOutOfDateError) {
+      return showProblem(`${e.message} Discard the saved draft to start again from the current version.`, { label: "Discard the saved draft", id: "discard-stale", run: () => be.discardDraft() });
+    }
+    return showProblem((e as Error).message);
+  }
   let def;
-  try { def = await be.loadDefinition(); } catch (e) { app.replaceChildren(h("p", { role: "alert", id: "load-error" }, (e as Error).message)); return; }
-  // The draft lives in this page. There is no saved draft on the server yet, so a reload drops unpublished edits.
-  const ed: Editor = new Editor(app, def, await be.lookups(def.forms), {
+  try { def = await be.loadDefinition(); } catch (e) { return showProblem((e as Error).message); }
+  if (def.version !== lock.baseVersion) {  // someone published between the two calls
+    return showProblem(`The application is now at version ${def.version}, and your saved draft started from version ${lock.baseVersion}.`, { label: "Discard the saved draft", id: "discard-stale", run: () => be.discardDraft() });
+  }
+  // A log that does not replay is not worth opening: say so, and offer to start again.
+  try { History.rebuild(def, lock.log); }
+  catch (e) {
+    return showProblem(`Your saved draft cannot be replayed on this version (${(e as Error).message}).`, { label: "Discard the saved draft", id: "discard-broken", run: () => be.discardDraft() });
+  }
+
+  const autosaveMs = Number(q.get("autosave") ?? 1500), heartbeatMs = Number(q.get("heartbeat") ?? 5 * 60 * 1000);
+  let ed!: Editor;
+  const saver = new DraftSaver(be, () => ed.history.log, lock.log, { delayMs: autosaveMs, heartbeatMs, onState: (_s, m) => ed?.setDraftState(m) });
+  ed = new Editor(app, def, await be.lookups(def.forms), {
+    changed: () => saver.schedule(),
+    async saveDraft() { await saver.saveNow(); if (saver.state !== "saved") throw new Error(saver.message); return `Draft saved with ${ed.history.log.length} edit${ed.history.log.length === 1 ? "" : "s"}.`; },
     async publish({ log, definition }) {
-      const message = await be.publish(log, definition);
-      ed.rebase(await be.loadDefinition(), message);  // the next edit starts from the version that is now live
+      await saver.pause();  // a publish ends the draft, so no save may arrive after it
+      let message: string;
+      try { message = await be.publish(log, definition); } catch (e) { saver.unpause(); throw e; }
+      try {
+        const fresh = await be.lockDraft();  // the next draft starts from the version that is now live
+        ed.rebase(await be.loadDefinition(), message);
+        saver.resume(fresh.log);
+      } catch (e) {
+        saver.stop();  // the version is live, but this page cannot carry on from it
+        return `${message} The page could not start the next draft (${(e as Error).message}). Reload the editor to continue.`;
+      }
       return message;
     },
+    async discard() {
+      if (!window.confirm("Discard your draft? Your unpublished edits will be lost.")) return "Kept your draft.";
+      await saver.pause();
+      try {
+        await be.discardDraft();
+        const fresh = await be.lockDraft();
+        ed.rebase(await be.loadDefinition(), "Discarded your draft.");
+        saver.resume(fresh.log);
+        return "Discarded your draft.";
+      } catch (e) { saver.unpause(); throw e; }
+    },
   }, editForm);
-  window.addEventListener("beforeunload", (e) => { if (ed.unpublishedEdits > 0) e.preventDefault(); });
-  (window as unknown as { __spike5: unknown }).__spike5 = { editor: ed };
+  if (lock.log.length) ed.resume(lock.log);
+  ed.setDraftState(saver.message || "Draft saved.");
+  window.addEventListener("beforeunload", (e) => { if (saver.dirty) e.preventDefault(); });
+  (window as unknown as { __spike5: unknown }).__spike5 = { editor: ed, saver };
 }
 
 async function run() {

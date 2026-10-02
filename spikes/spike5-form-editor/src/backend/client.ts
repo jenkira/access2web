@@ -8,6 +8,21 @@ import { allControls } from "../model/types.ts";
 import { AdapterError, entityFromNative, fromNative, renamesOf, type NativeDefinition, type NativeEntity } from "./adapter.ts";
 
 export interface Identity { user: string; groups?: string; roles?: string }
+
+/** Someone else holds the draft. */
+export class DraftLockedError extends Error {
+  lockedBy: string; expiresAt: string;
+  constructor(lockedBy: string, expiresAt: string) { super(`${lockedBy} is editing a draft of this application.`); this.lockedBy = lockedBy; this.expiresAt = expiresAt; }
+}
+/** The saved draft started from a version that is no longer current. */
+export class DraftOutOfDateError extends Error {
+  base: number; current: number;
+  constructor(base: number, current: number) { super(`The saved draft started from version ${base}, and the application is now at version ${current}.`); this.base = base; this.current = current; }
+}
+/** This person no longer holds the lock, so a save was refused. */
+export class DraftLostError extends Error {}
+
+export interface DraftLock { baseVersion: number; log: Op[]; expiresAt: string }
 export type SaveResult = { saved: true; version: number } | { saved: false; versionChanged?: number; message: string };
 
 export class BackendClient {
@@ -46,6 +61,36 @@ export class BackendClient {
   }
 
   get currentVersion(): number { return this.version; }
+
+  /** Take the draft, or resume the one that is already this person's. */
+  async lockDraft(): Promise<DraftLock> {
+    const r = await this.call("POST", "/draft/lock");
+    if (r.status === 200) return { baseVersion: r.body.base_version, log: r.body.log as Op[], expiresAt: r.body.expires_at };
+    if (r.status === 403) throw new Error("You do not have permission to edit this application.");
+    if (r.status === 409 && r.body.error === "draft_locked") throw new DraftLockedError(r.body.locked_by, r.body.expires_at);
+    if (r.status === 409 && r.body.error === "draft_out_of_date") throw new DraftOutOfDateError(r.body.base, r.body.current);
+    throw new Error(`The draft could not be opened (${r.status}).`);
+  }
+
+  /** Save the log. Each save keeps the lock for longer. */
+  async saveDraft(log: Op[]): Promise<{ saved: number; expiresAt: string }> {
+    const r = await this.call("PUT", "/draft", { log });
+    if (r.status === 200) return { saved: r.body.saved, expiresAt: r.body.expires_at };
+    if (r.status === 409) throw new DraftLostError(r.body.error === "draft_locked"
+      ? `${r.body.locked_by} has taken over the draft, so your edits here are not saved. Copy anything you need, then reload.`
+      : "Your lock on the draft has ended, so your edits here are not saved. Reload to start again.");
+    if (r.status === 403) throw new Error("You do not have permission to edit this application.");
+    throw new Error(`The draft was not saved: ${r.body.detail ?? r.status}.`);
+  }
+
+  /** Throw the draft away. Its holder may, and so may anyone with manage application. */
+  async discardDraft(): Promise<void> {
+    const r = await this.call("DELETE", "/draft");
+    if (r.status === 200) return;
+    if (r.status === 409 && r.body.error === "draft_locked") throw new DraftLockedError(r.body.locked_by, r.body.expires_at);
+    if (r.status === 403) throw new Error("You do not have permission to discard this draft.");
+    throw new Error(`The draft was not discarded (${r.status}).`);
+  }
 
   /** Rows for the combo boxes and subforms of some forms. A table that the person cannot read gives no rows. */
   async lookups(forms: Form[]): Promise<Lookups> {
@@ -93,6 +138,7 @@ export class BackendClient {
     if (r.status === 409 && r.body.error === "version_changed") {
       throw new Error(`Not published. The application is now at version ${r.body.current}, and this draft started from version ${this.version}. Reload the editor to start again from the new version.`);
     }
+    if (r.status === 409 && r.body.error === "draft_locked") throw new Error(`Not published. ${r.body.locked_by} is editing a draft of this application.`);
     if (r.status === 409) throw new Error(`Not published: ${r.body.detail ?? "the application is in use. Try again in a moment."}`);
     throw new Error(`Not published: ${r.body.detail ?? r.body.error ?? r.status}`);
   }

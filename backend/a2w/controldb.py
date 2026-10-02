@@ -63,6 +63,17 @@ create table if not exists a2w_control.grants (
   unique (app_id, subject_type, subject_id, resource_type, resource_id, level)
 );
 
+-- A saved draft of the next version of an application, held by one person at a time. The lock is a lease: it ends
+-- at expires_at, and each save extends it, so a closed tab does not block everyone else for ever.
+create table if not exists a2w_control.drafts (
+  app_id int primary key references a2w_control.applications(id),
+  locked_by text not null,
+  locked_at timestamptz not null default now(),
+  base_version int not null,
+  log jsonb not null default '[]'::jsonb,
+  expires_at timestamptz not null
+);
+
 create table if not exists a2w_control.audit_events (
   seq bigserial primary key,
   ts timestamptz not null default clock_timestamp(),

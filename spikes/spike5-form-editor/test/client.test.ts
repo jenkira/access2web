@@ -1,7 +1,7 @@
 // The backend client, with fetch stubbed: how each answer from the backend reaches the user.
 import test, { afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { BackendClient } from "../src/backend/client.ts";
+import { BackendClient, DraftLockedError, DraftLostError, DraftOutOfDateError } from "../src/backend/client.ts";
 import type { Definition } from "../src/model/types.ts";
 import type { Op } from "../src/model/ops.ts";
 
@@ -100,4 +100,49 @@ test("combo and subform tables are read for lookups, and a table that cannot be 
   const out = await c.lookups(forms);
   assert.deepEqual(out, { customers: [{ id: 1, name: "Acme" }], lines: [] });
   assert.deepEqual(seen.sort(), ["/api/apps/shop/tables/customers/records?limit=500", "/api/apps/shop/tables/lines/records?limit=500"]);
+});
+
+test("taking the draft returns the saved log, and each refusal is its own kind of error", async () => {
+  const c = new BackendClient("shop", { user: "dee" });
+  const log = [{ t: "setLabel", form: "F", id: "x", label: "L" }];
+  const calls = stub(200, { base_version: 2, log, expires_at: "2026-10-02T10:30:00+00:00" });
+  assert.deepEqual(await c.lockDraft(), { baseVersion: 2, log, expiresAt: "2026-10-02T10:30:00+00:00" });
+  assert.deepEqual([calls[0]!.method, calls[0]!.url], ["POST", "/api/apps/shop/draft/lock"]);
+  stub(409, { error: "draft_locked", locked_by: "dan", expires_at: "2026-10-02T11:00:00+00:00" });
+  await assert.rejects(c.lockDraft(), (e: unknown) => e instanceof DraftLockedError && e.lockedBy === "dan" && e.expiresAt.startsWith("2026"));
+  stub(409, { error: "draft_out_of_date", base: 1, current: 3 });
+  await assert.rejects(c.lockDraft(), (e: unknown) => e instanceof DraftOutOfDateError && e.base === 1 && e.current === 3);
+  stub(403, {});
+  await assert.rejects(c.lockDraft(), /do not have permission to edit/);
+});
+
+test("a save sends the log, and a lost lock is said plainly", async () => {
+  const c = new BackendClient("shop", { user: "dee" });
+  const log = [{ t: "setLabel", form: "F", id: "x", label: "L" }] as never;
+  const calls = stub(200, { saved: 1, expires_at: "later" });
+  assert.deepEqual(await c.saveDraft(log), { saved: 1, expiresAt: "later" });
+  assert.deepEqual([calls[0]!.method, calls[0]!.url, calls[0]!.body], ["PUT", "/api/apps/shop/draft", { log }]);
+  stub(409, { error: "draft_locked", locked_by: "dan" });
+  await assert.rejects(c.saveDraft(log), (e: unknown) => e instanceof DraftLostError && /dan has taken over/.test(e.message));
+  stub(409, { error: "no_draft" });
+  await assert.rejects(c.saveDraft(log), (e: unknown) => e instanceof DraftLostError && /lock on the draft has ended/.test(e.message));
+  stub(400, { detail: "the draft is too large" });
+  await assert.rejects(c.saveDraft(log), /the draft is too large/);
+});
+
+test("discarding sends a delete, and someone else's active draft is a lock error", async () => {
+  const c = new BackendClient("shop", { user: "dee" });
+  const calls = stub(200, { discarded: true });
+  await c.discardDraft();
+  assert.deepEqual([calls[0]!.method, calls[0]!.url], ["DELETE", "/api/apps/shop/draft"]);
+  stub(409, { error: "draft_locked", locked_by: "dan", expires_at: "x" });
+  await assert.rejects(c.discardDraft(), DraftLockedError);
+  stub(403, {});
+  await assert.rejects(c.discardDraft(), /do not have permission to discard/);
+});
+
+test("a publish that meets someone else's draft says whose", async () => {
+  const c = new BackendClient("shop", { user: "mia" });
+  stub(409, { error: "draft_locked", locked_by: "dan" });
+  await assert.rejects(c.publish([], draft()), /dan is editing a draft/);
 });

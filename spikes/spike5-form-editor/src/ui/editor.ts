@@ -12,7 +12,14 @@ import { type Lookups, renderForm } from "./render.ts";
 const ADDABLE = ["text", "number", "date", "checkbox", "textarea"] as const;
 
 /** `publish` gets the log up to the pointer and the draft it builds, for a server that takes the result and not the log. */
-export interface EditorHooks { saveDraft?(log: Op[]): Promise<string>; publish?(ctx: { log: Op[]; definition: Definition }): Promise<string> }
+export interface EditorHooks {
+  saveDraft?(log: Op[]): Promise<string>;
+  publish?(ctx: { log: Op[]; definition: Definition }): Promise<string>;
+  /** Called after every edit, undo, and redo, with the log up to the pointer. For autosave. */
+  changed?(log: Op[]): void;
+  /** Throw the saved draft away and start again from the published version. Offered as a button when present. */
+  discard?(): Promise<string>;
+}
 
 export class Editor {
   history: History;
@@ -23,6 +30,7 @@ export class Editor {
   private renamePreview: ReturnType<typeof planRenameField> | null = null;
   private renameDraft = { field: "", to: "" };  // kept across renders, so a preview does not reset the choice
   private counter = 0;
+  private draftState = "";  // shown beside the draft buttons. Changed without a redraw, so typing is not interrupted.
 
   private root: HTMLElement;
   private lookups: Lookups;
@@ -54,7 +62,7 @@ export class Editor {
       this.history.do(op);
       const fresh = ruleWarnings(this.history.current).filter((w) => !before.has(key(w)));
       this.say(fresh.length ? `${ok} Warning: ${fresh[0]!.message}` : ok);
-      this.renamePreview = null; this.render(); return true;
+      this.renamePreview = null; this.render(); this.hooks.changed?.(this.history.log); return true;
     }
     catch (e) { if (e instanceof OpError) { this.say(`Not changed: ${e.message}`, "alert"); this.render(); return false; } throw e; }
   }
@@ -136,8 +144,26 @@ export class Editor {
   /** Save the current log to the server before publishing, so Publish always publishes what is on screen. */
   async hooks_saveForPublish(): Promise<void> { await this.hooks.saveDraft?.(this.history.log); }
 
-  undo() { if (this.history.canUndo) { this.history.undo(); this.say("Undid the last edit."); this.keepSelection(); this.render(); } }
-  redo() { if (this.history.canRedo) { this.history.redo(); this.say("Redid the edit."); this.keepSelection(); this.render(); } }
+  undo() { if (this.history.canUndo) { this.history.undo(); this.say("Undid the last edit."); this.keepSelection(); this.render(); this.hooks.changed?.(this.history.log); } }
+  redo() { if (this.history.canRedo) { this.history.redo(); this.say("Redid the edit."); this.keepSelection(); this.render(); this.hooks.changed?.(this.history.log); } }
+
+  /** Replay a saved log onto the draft, so the person carries on where they stopped. Throws OpError if it does not fit. */
+  resume(log: Op[]): void {
+    for (const op of log) this.history.do(op);
+    this.say(log.length ? `Resumed your saved draft with ${log.length} edit${log.length === 1 ? "" : "s"}.` : "");
+    this.keepSelection(); this.render();
+  }
+
+  /** Show how the draft is saved, beside the buttons. Does not redraw the editor. */
+  setDraftState(text: string): void {
+    this.draftState = text;
+    const el = this.root.querySelector("#draft-state");
+    if (el) el.textContent = text;
+    else if (text) this.render();  // the first time, the line is not there yet
+  }
+
+  /** Say something from outside an edit, such as a result that arrives later. */
+  notify(msg: string, kind: "status" | "alert" = "status"): void { this.say(msg, kind); this.render(); }
   private keepSelection() { if (this.selected && !this.locate(this.selected)) this.selected = null; if (!this.def.forms.some((f) => f.name === this.form)) this.form = this.def.forms[0]!.name; }
 
   private onKey(e: KeyboardEvent) {
@@ -230,7 +256,9 @@ export class Editor {
     const draft = h("section", { class: "panel", "aria-labelledby": "draft-h" }, h("h2", { id: "draft-h" }, "Draft"),
       h("p", {}, `Edits in the log: ${this.history.log.length}`), warnList,
       btn("save", "Save draft", async () => { if (!this.hooks.saveDraft) return; try { this.say(await this.hooks.saveDraft(this.history.log)); } catch (e) { this.say((e as Error).message, "alert"); } this.render(); }, !!this.hooks.saveDraft),
-      btn("publish", "Publish", async () => { if (!this.hooks.publish) return; try { this.say(await this.hooks.publish({ log: this.history.log, definition: this.history.current })); } catch (e) { this.say((e as Error).message, "alert"); } this.render(); }, !!this.hooks.publish));
+      btn("publish", "Publish", async () => { if (!this.hooks.publish) return; try { this.say(await this.hooks.publish({ log: this.history.log, definition: this.history.current })); } catch (e) { this.say((e as Error).message, "alert"); } this.render(); }, !!this.hooks.publish),
+      ...(this.hooks.discard ? [btn("discard", "Discard draft", async () => { try { this.say(await this.hooks.discard!()); } catch (e) { this.say((e as Error).message, "alert"); } this.render(); })] : []),
+      ...(this.draftState ? [h("p", { id: "draft-state", role: "status" }, this.draftState)] : []));
 
     const status = h("div", { id: "status", role: this.statusKind, "aria-live": this.statusKind === "alert" ? "assertive" : "polite" }, this.status);
 

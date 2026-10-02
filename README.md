@@ -108,6 +108,7 @@ Table 2 lists the answers the route gives.
 | 400 | A rename or form is invalid, nothing changed, or the version would change nothing. |
 | 403 | The person does not have manage application, or the application does not exist. |
 | 409 `version_changed` | The base version is out of date. Reload and try again. |
+| 409 `draft_locked` | Someone else holds an active draft. Nothing changed. |
 | 409 | The application was in use and did not become free within 5 seconds. Nothing changed. Try again. |
 
 Every request now takes a share lock on the application's row for the length of its transaction. A new version takes the row for update, so it waits for requests in flight, and a request that starts during the change waits and reads the new version. This stops a request from running with a definition that does not match the tables.
@@ -141,10 +142,36 @@ Table 3 shows what the page asks of the backend.
 | Page | Route | Needs |
 |---|---|---|
 | Edit | `GET /api/apps/{slug}/definition` | Design application |
+| Edit, on opening | `POST /api/apps/{slug}/draft/lock` | Design application |
+| Edit, autosave and Save draft | `PUT /api/apps/{slug}/draft` | Design application, and the lock |
+| Edit, Discard draft | `DELETE /api/apps/{slug}/draft` | The lock, or manage application |
 | Edit, Publish | `POST /api/apps/{slug}/versions` | Manage application |
 | Run | `GET /api/apps/{slug}/forms/{form}` | View data on the form |
 | Run, Save | `POST /api/apps/{slug}/forms/{form}/records` | Edit data on the form |
 | Run, combo boxes and subforms | `GET /api/apps/{slug}/tables/{table}/records` | View data on the table |
+
+### The saved draft and its lock
+
+An editor opens a draft of the next version, and the backend holds it. Only one person holds the draft of an application at a time. Table 4 describes how it behaves.
+
+**Table 4. The saved draft**
+
+| Situation | What happens |
+|---|---|
+| A designer opens the editor | The page takes the lock. If the person already holds a draft, the page replays it, so they carry on where they stopped. |
+| The designer edits | The page saves the draft about 1.5 seconds after the last edit. Undo and redo are saved too. |
+| The page stays open | It saves every 5 minutes, even with no edit, to keep the lock. |
+| Another designer opens the editor | They see who holds the draft and until when. They cannot edit. |
+| A person with manage application clicks "Take over the draft" | The draft is discarded, and the page opens a new one for them. |
+| The lock is not renewed for 30 minutes | The lock lapses. Another designer can take the draft, and the earlier holder's edits are dropped. |
+| The holder's lock was taken | The holder's next save is refused, and the page says who has the draft. The edits stay on screen but are not saved. |
+| The holder publishes | The new version is live, the draft is deleted, and the page opens the next draft from the new version. |
+| Someone else tries to publish a version | Refused with 409 `draft_locked` while another person holds an active draft. A lapsed draft does not stop it, and the new version deletes it. |
+| Discard draft | After a confirmation, the draft is deleted and a new one opens from the live version. |
+
+The backend stores the edit log as the editor wrote it. It checks the shape and the size (at most 5,000 edits and 1 MB), but it cannot replay the log, because the operations are defined in the editor. The editor replays the log when it opens, and offers to discard a draft that does not replay. Publishing checks the result in full, so a bad log cannot produce a bad version.
+
+Locking, taking over, and discarding are recorded in the audit log. Saves are not.
 
 The backend decides every permission. The page shows what it is told, so a person who may not publish sees the refusal as a message. After a publish, the page starts again from the new version. A draft that started from an older version is refused, with the version it needs to reload.
 
@@ -152,9 +179,9 @@ Without `app=` in the address, the page uses the prototype's own server, as in t
 
 ## Configuration
 
-Table 4 lists the environment variables.
+Table 5 lists the environment variables.
 
-**Table 4. Environment variables**
+**Table 5. Environment variables**
 
 | Variable | Purpose |
 |---|---|
@@ -177,7 +204,9 @@ Table 4 lists the environment variables.
 - A table without a single-column primary key can be listed and created in, but not edited or deleted from.
 - A table that has a form can be created in and updated only through the form, so edit data on the table alone no longer lets a person write. Deleting is not affected. Editing a form after publish is not built.
 - A new version carries renames and form changes only. Adding or removing a field, an entity, or a relationship needs a design that handles existing data, and is not built.
-- The form editor keeps its draft in the browser. There is no saved draft or lock on the server, so a reload drops unpublished edits (the page asks before it unloads), and two designers can edit at once. The first to publish wins, and the second gets 409 `version_changed`.
+- Closing the editor does not release the lock. It lapses after 30 minutes, or a person with manage application can take the draft over. Opening the editor again as the same person resumes the draft at once.
+- The backend cannot replay a draft's edit log, so a corrupt log is found when the editor opens it, not when it is saved.
+- A draft belongs to the application, not to a form. Two designers cannot edit different forms at the same time.
 - The editor page can rename a field but not an entity. The route accepts both, and the editor refuses to send an entity rename that would give the table another name, because the backend names a table after its entity.
 - The editor is a prototype from Spike 5. Its page does not use the portal's styling or sign-in.
 - After an entity rename, earlier audit events keep the old table name, because the log is append-only. New events use the new name.

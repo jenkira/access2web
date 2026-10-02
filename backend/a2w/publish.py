@@ -4,7 +4,7 @@ from psycopg.types.json import Jsonb
 
 import psycopg
 
-from . import authz, db, ddl, formrules, migrate, runtime
+from . import authz, db, ddl, drafts, formrules, migrate, runtime
 from .definition import ConversionItem, Definition
 from .importer import Analysis, Extraction, analyse, summarise
 from .names import check_slug, schema_for
@@ -182,6 +182,7 @@ def republish(conn, slug: str, who: authz.Identity, *, base_version: int, rename
         raise Busy("The application is in use. Try again in a moment.") from None
     if not app:
         raise runtime.Denied()
+    drafts.check_not_locked_by_another(conn, app["id"], who)  # a new version must not run over someone else's draft
     if app["current_version"] != base_version:
         raise runtime.VersionChanged(app["current_version"])
     old = Definition.model_validate(conn.execute(
@@ -217,6 +218,7 @@ def republish(conn, slug: str, who: authz.Identity, *, base_version: int, rename
     conn.execute("insert into a2w_control.app_versions(app_id, version, definition, published_by) values (%s,%s,%s,%s)",
                  (app["id"], version, Jsonb(d.model_dump(mode="json")), who.user_id))
     conn.execute("update a2w_control.applications set current_version = %s where id = %s", (version, app["id"]))
+    conn.execute("delete from a2w_control.drafts where app_id = %s", (app["id"],))  # the draft became this version
     db.audit(conn, who.user_id, "publish", app=slug, detail={
         "version": version, "renames": [r.model_dump(by_alias=True, exclude_defaults=True) for r in renames],
         "forms_changed": d.forms != old.forms})
