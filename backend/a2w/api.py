@@ -22,6 +22,11 @@ class GrantIn(BaseModel):
     level: str
 
 
+class FormSaveIn(BaseModel):
+    version: int  # the version of the form that the browser opened
+    values: dict[str, Any]
+
+
 class PublishIn(BaseModel):
     slug: str
     name: str
@@ -30,6 +35,7 @@ class PublishIn(BaseModel):
     confirmed_classification: str
     permissions_confirmed: bool
     grants: list[GrantIn] = Field(default_factory=list)
+    forms: list[dict[str, Any]] = Field(default_factory=list)
 
 
 def create_app(portal: PortalAdapter | None = None) -> FastAPI:
@@ -59,6 +65,16 @@ def create_app(portal: PortalAdapter | None = None) -> FastAPI:
     async def _nf(_: Request, __):
         from fastapi.responses import JSONResponse
         return JSONResponse({"detail": "Record not found."}, status_code=404)
+
+    @app.exception_handler(runtime.VersionChanged)
+    async def _version(_: Request, exc):
+        from fastapi.responses import JSONResponse
+        return JSONResponse({"error": "version_changed", "current": exc.current}, status_code=409)
+
+    @app.exception_handler(runtime.Unprocessable)
+    async def _unprocessable(_: Request, exc):
+        from fastapi.responses import JSONResponse
+        return JSONResponse(exc.payload, status_code=422)
 
     @app.exception_handler(runtime.BadRequest)
     async def _bad(_: Request, exc):
@@ -103,7 +119,7 @@ def create_app(portal: PortalAdapter | None = None) -> FastAPI:
                 out = pub.publish(conn, job_id, ident, slug=body.slug, name=body.name, description=body.description,
                                   icon=body.icon, confirmed_classification=body.confirmed_classification,
                                   permissions_confirmed=body.permissions_confirmed,
-                                  grants=[g.model_dump() for g in body.grants])
+                                  grants=[g.model_dump() for g in body.grants], forms=body.forms)
         except pub.PublishError as e:
             raise HTTPException(400, str(e))
         except ValueError as e:
@@ -185,9 +201,26 @@ def create_app(portal: PortalAdapter | None = None) -> FastAPI:
                 raise DENIED
             tables = [e.name for e in d.entities
                       if authz.can(conn, row["id"], ident, "table", e.name, "view_data")]
-            return {"slug": slug, "name": row["name"], "tables": tables,
+            forms = [{"name": f["name"], "title": f.get("title", f["name"]), "entity": f["entity"]} for f in d.forms
+                     if authz.can(conn, row["id"], ident, "form", f["name"], "view_data")]
+            return {"slug": slug, "name": row["name"], "tables": tables, "forms": forms,
                     "entities": [e.model_dump(mode="json", include={"name", "source_name", "fields", "primary_key"})
                                  for e in d.entities if e.name in tables]}
+
+    @app.get("/api/apps/{slug}/forms/{form}")
+    def get_form(slug: str, form: str, ident: Identity = Depends(identity)):
+        with db.transaction() as conn:
+            return runtime.get_form(conn, slug, ident, form)
+
+    @app.post("/api/apps/{slug}/forms/{form}/records", status_code=201)
+    def save_form_new(slug: str, form: str, body: FormSaveIn, ident: Identity = Depends(identity)):
+        with db.transaction() as conn:
+            return runtime.save_form(conn, slug, ident, form, body.values, version=body.version)
+
+    @app.put("/api/apps/{slug}/forms/{form}/records/{key}")
+    def save_form_existing(slug: str, form: str, key: str, body: FormSaveIn, ident: Identity = Depends(identity)):
+        with db.transaction() as conn:
+            return runtime.save_form(conn, slug, ident, form, body.values, version=body.version, key=key)
 
     @app.get("/api/apps/{slug}/tables/{table}/records")
     def list_records(slug: str, table: str, limit: int = 100, offset: int = 0, ident: Identity = Depends(identity)):

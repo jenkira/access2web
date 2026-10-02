@@ -239,7 +239,7 @@ The random test checks four things for every case: whether the expression is val
 
 What is not done:
 
-- The server does not call the Python checker yet. The Phase 1 backend has no forms, so there is nowhere to call it from. Phase 2 adds forms.
+- Editing and versioning of forms after publish. The backend accepts forms when an application is published, checks them, and applies their rules on every save through a form. A form cannot yet be changed without republishing, which is the Phase 2 draft workflow.
 - `today()` uses whatever time the caller passes. The browser and the server do not yet share one event time.
 
 ### Build the editor

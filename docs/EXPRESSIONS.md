@@ -129,7 +129,7 @@ The warning is advice. It never blocks an edit or a publish. The check is not pa
 
 ### Today
 
-`today()` returns the UTC date of the time that the caller supplies. If the browser and the server each use their own clock, a rule that uses `today()` can give different answers around midnight UTC. The design is for the server to fix one event time for a save and pass it to every evaluation. The prototype does not do this yet: the browser uses its own clock, and the server uses its own.
+`today()` returns the UTC date of the time that the caller supplies. The server fixes one instant for each save and uses it for every rule in that save. The browser uses its own clock, so around midnight UTC a warning in the browser can differ from the server's answer. The server's answer decides.
 
 ## Limits
 
@@ -168,13 +168,30 @@ An expression may refer only to fields of the form's entity. The editor refuses 
 
 ### Checking a record on the server
 
-For each save, the server checks the record against the form, using `failed_rules` and `unknown_fields` in `backend/a2w/formrules.py`, in this order:
+The backend applies the rules to every save that goes through a form. The routes are:
 
-1. Refuse a record that holds a field no control on the form binds to.
-2. For each control that has validation rules and is visible, evaluate each rule and report the message of each false one.
-3. For each visible control whose field is required and not a key, report `<label> is required` when the value is null or the empty string.
+- `GET /api/apps/{slug}/forms/{form}` returns the form and the version of the application. The browser sends that version back when it saves.
+- `POST /api/apps/{slug}/forms/{form}/records` creates a record.
+- `PUT /api/apps/{slug}/forms/{form}/records/{key}` updates a record. The values are the whole form.
 
-The errors from step 2 come before the errors from step 3, and each group follows the order of the controls on the form.
+Each save is checked in this order, and the first failure stops it:
+
+1. **Permission.** The form exists and the user has edit data on it. A missing form and a forbidden form give the same answer.
+2. **Version.** The form is from the current version of the application. If not, the answer is 409 with `version_changed`, and the user must reload.
+3. **Unknown fields.** The record holds only fields that a control on the form binds to. If not, the answer is 422 with the field names.
+4. **Rules.** For each visible control that has validation rules, every rule is true. For each visible control whose field is required and not a key, the value is not null or the empty string. If not, the answer is 422 with `{control, message}` for each failure.
+
+The errors from the rules come before the errors from required fields, and each group follows the order of the controls on the form. The checker is `failed_rules` in `backend/a2w/formrules.py`.
+
+A save that passes goes through the same audited write as any other, so the audit log records the person and the old and new values.
+
+### Checking a form when it is published
+
+Publish refuses a form that cannot work, so a rule that cannot run is never stored. `validate_forms` in `backend/a2w/formrules.py` checks that every control is bound to a field that exists, that every expression parses and names only fields of the form's entity, that every rule has a message, and that combo boxes, subforms, and control ids are valid. The TypeScript editor has the same check, and `spec/expression/validation.json` holds the cases that both must agree on.
+
+### A limit
+
+The rules apply to a save through a form. The table routes do not apply them. A person with edit data on a table can write the same record through `POST /api/apps/{slug}/tables/{table}/records` and the rule is not checked. A test records this. The owner has to decide whether to accept it, to require saves through a form, or to attach rules to the entity.
 
 ## Changing the language
 

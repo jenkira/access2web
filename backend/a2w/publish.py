@@ -2,7 +2,7 @@
 from psycopg import sql
 from psycopg.types.json import Jsonb
 
-from . import authz, db, ddl
+from . import authz, db, ddl, formrules
 from .definition import ConversionItem, Definition
 from .importer import Analysis, Extraction, analyse, summarise
 from .names import check_slug, schema_for
@@ -45,7 +45,7 @@ def get_report(conn, job: int) -> dict | None:
 
 def publish(conn, job_id: int, who: authz.Identity, *, slug: str, name: str, description: str, icon: str,
             confirmed_classification: str, permissions_confirmed: bool,
-            grants: list[dict]) -> dict:
+            grants: list[dict], forms: list[dict] | None = None) -> dict:
     check_slug(slug)
     if confirmed_classification not in ("general", "personal", "sensitive"):
         raise PublishError("confirm the data classification: general, personal, or sensitive")
@@ -71,6 +71,12 @@ def publish(conn, job_id: int, who: authz.Identity, *, slug: str, name: str, des
 
     d = Definition.model_validate(job["definition"])
     d.app = slug
+    # A rule that cannot run is never stored. Entity and field names are the ones in the conversion report.
+    d.forms = list(forms or [])
+    problems = formrules.validate_forms(d.model_dump(mode="json"))
+    if problems:
+        shown = "; ".join(problems[:10]) + (f"; and {len(problems) - 10} more" if len(problems) > 10 else "")
+        raise PublishError(f"invalid forms: {shown}")
     ex = Extraction.model_validate(job["extraction"])
     row_map = analyse(ex).row_map
 

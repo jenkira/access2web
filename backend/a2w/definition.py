@@ -1,5 +1,5 @@
 """Application definition: the versioned JSON document the runtime interprets."""
-from typing import Literal
+from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 Status = Literal["converted", "partly_converted", "not_converted"]
@@ -61,6 +61,8 @@ class Definition(BaseModel):
     app: str
     version: int = 1
     entities: list[Entity]
+    # Forms are JSON as the editor writes them: rows of controls. a2w.formrules checks them and applies their rules.
+    forms: list[dict[str, Any]] = Field(default_factory=list)
 
     def entity(self, name: str) -> Entity | None:
         return next((e for e in self.entities if e.name == name), None)

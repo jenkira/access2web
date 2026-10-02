@@ -42,9 +42,15 @@ export function checkRules(def: Definition, form: Form, rules: Rule[]): void {
   }
 }
 
+const CONTROL_TYPES = new Set(["text", "number", "date", "checkbox", "textarea", "combo", "label", "button", "subform"]);
+const BOUND_TYPES = new Set(["text", "number", "date", "checkbox", "textarea", "combo"]);
+
 export function checkControl(def: Definition, form: Form, c: Control): void {
   if (!c.id || !/^[A-Za-z][A-Za-z0-9_]*$/.test(c.id)) throw new OpError("control id must be letters, digits, and underscores");
-  if ("bind" in c && !entityOf(def, form.entity).fields.some((f) => f.name === c.bind)) throw new OpError(`control ${c.id} is bound to unknown field ${c.bind}`);
+  if (!CONTROL_TYPES.has(c.type)) throw new OpError(`control ${c.id} has unknown type ${c.type}`);
+  const text = c.type === "label" ? c.text : (c as { label?: unknown }).label;
+  if (typeof text !== "string" || !text.trim()) throw new OpError(`control ${c.id} needs ${c.type === "label" ? "text" : "a label"}`);
+  if (BOUND_TYPES.has(c.type) && !entityOf(def, form.entity).fields.some((f) => f.name === (c as { bind?: string }).bind)) throw new OpError(`control ${c.id} is bound to unknown field ${(c as { bind?: string }).bind}`);
   if (c.type === "combo") {
     const src = entityOf(def, c.source.entity);
     for (const f of [c.source.value, c.source.display]) if (!src.fields.some((x) => x.name === f)) throw new OpError(`combo ${c.id} refers to unknown field ${f} of ${src.name}`);
@@ -64,7 +70,10 @@ export function checkControl(def: Definition, form: Form, c: Control): void {
 export function validateDefinition(def: Definition): string[] {
   const problems: string[] = [];
   const guard = (fn: () => void, where: string) => { try { fn(); } catch (e) { if (e instanceof OpError) problems.push(`${where}: ${e.message}`); else throw e; } };
+  const names = new Set<string>();
   for (const form of def.forms) {
+    if (names.has(form.name)) problems.push(`form ${form.name}: duplicate form name`);
+    names.add(form.name);
     guard(() => entityOf(def, form.entity), `form ${form.name}`);
     if (!def.entities.some((e) => e.name === form.entity)) continue;
     const seen = new Set<string>();

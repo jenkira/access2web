@@ -23,6 +23,7 @@ Phase 1 covers upload, analysis, table and CRUD generation, application-level pe
 | FR-15 VBA classification | Done | Rules only. A model for undecided cases is Phase 3. |
 | FR-21 Manual-redesign flags | Done | Each flag carries the reason and a suggested alternative. |
 | FR-22 Data classification | Done | Suggests a class from field names. Publishing needs the owner's confirmation. |
+| Form rules (a preview of Phase 2) | Partial | Forms are accepted when an application is published, and checked. Every save through a form applies its validation rules on the server. Editing a form after publish is not built. |
 
 Not built yet: queries (Spike 2), forms and reports (Phase 2), object-level and row-level permissions (FR-9, FR-10), binary and multi-value fields, and everything in Phases 2 to 4. The conversion report lists each gap for every database.
 
@@ -108,6 +109,7 @@ Table 2 lists the environment variables.
 - The API stores the extracted metadata, including rows, in the control database. Large databases need object storage, which is not built yet.
 - The container image and the Helm chart were written but not built or linted, because the build environment had no Docker daemon and no Helm.
 - A table without a single-column primary key can be listed and created in, but not edited or deleted from.
+- Form rules apply to saves through a form. The table routes do not apply them, so a person with edit data on a table can write a record that a form would refuse. The owner has to decide whether to accept this.
 - Audit tables are not partitioned by month yet.
 - Permission results are not cached. This keeps changes immediate, and a cache with invalidation is a later optimisation.
 

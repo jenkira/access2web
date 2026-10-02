@@ -1,8 +1,10 @@
 """Runtime: record access for a published application. Every call checks permissions first."""
+from datetime import datetime, timezone
+
 from psycopg import sql
 from psycopg.types.json import Jsonb
 
-from . import authz, db, ddl
+from . import authz, db, ddl, formrules
 from .definition import Definition, Entity
 from .names import schema_for
 
@@ -19,6 +21,22 @@ class NotFound(Exception):
 
 class BadRequest(Exception):
     pass
+
+
+class VersionChanged(Exception):
+    """The form the user has open is from an earlier version of the application."""
+
+    def __init__(self, current: int) -> None:
+        super().__init__(f"version changed to {current}")
+        self.current = current
+
+
+class Unprocessable(Exception):
+    """The record breaks a form rule, or holds a field the form does not have. The payload is the response body."""
+
+    def __init__(self, payload: dict) -> None:
+        super().__init__(payload.get("error", "unprocessable"))
+        self.payload = payload
 
 
 def load_app(conn, slug: str) -> tuple[dict, Definition]:
@@ -92,16 +110,30 @@ def get_record(conn, slug, ident, table, key) -> dict:
     return row
 
 
+def _insert(conn, slug: str, e: Entity, values: dict) -> dict:
+    q = sql.SQL("insert into {}.{} ({}) values ({}) returning *").format(
+        sql.Identifier(schema_for(slug)), sql.Identifier(e.name),
+        sql.SQL(", ").join(sql.Identifier(k) for k in values), sql.SQL(", ").join(sql.Placeholder() * len(values)))
+    return conn.execute(q, list(values.values())).fetchone()
+
+
+def _update(conn, slug: str, e: Entity, key: str, values: dict) -> dict:
+    q = sql.SQL("update {}.{} set {} where {} = %s returning *").format(
+        sql.Identifier(schema_for(slug)), sql.Identifier(e.name),
+        sql.SQL(", ").join(sql.SQL("{} = %s").format(sql.Identifier(k)) for k in values), _key(e, key))
+    row = conn.execute(q, [*values.values(), key]).fetchone()
+    if not row:
+        raise NotFound()
+    return row
+
+
 def create_record(conn, slug, ident, table, values) -> dict:
     app, d = load_app(conn, slug)
     e = _entity(d, table)
     _require(conn, app, ident, table, "edit_data")
     values = _clean(e, values)
     _scope(conn, app, ident)
-    q = sql.SQL("insert into {}.{} ({}) values ({}) returning *").format(
-        sql.Identifier(schema_for(slug)), sql.Identifier(e.name),
-        sql.SQL(", ").join(sql.Identifier(k) for k in values), sql.SQL(", ").join(sql.Placeholder() * len(values)))
-    return conn.execute(q, list(values.values())).fetchone()
+    return _insert(conn, slug, e, values)
 
 
 def update_record(conn, slug, ident, table, key, values) -> dict:
@@ -110,13 +142,55 @@ def update_record(conn, slug, ident, table, key, values) -> dict:
     _require(conn, app, ident, table, "edit_data")
     values = _clean(e, values, for_update=True)
     _scope(conn, app, ident)
-    q = sql.SQL("update {}.{} set {} where {} = %s returning *").format(
-        sql.Identifier(schema_for(slug)), sql.Identifier(e.name),
-        sql.SQL(", ").join(sql.SQL("{} = %s").format(sql.Identifier(k)) for k in values), _key(e, key))
-    row = conn.execute(q, [*values.values(), key]).fetchone()
-    if not row:
-        raise NotFound()
-    return row
+    return _update(conn, slug, e, key, values)
+
+
+# ---- forms
+def _form(d: Definition, name: str) -> dict:
+    form = next((f for f in d.forms if f.get("name") == name), None)
+    if form is None:
+        raise Denied()  # a form that does not exist looks the same as a form you may not use
+    return form
+
+
+def get_form(conn, slug, ident, form_name) -> dict:
+    """The form, and the version of the application it belongs to. The browser sends the version back when it saves."""
+    app, d = load_app(conn, slug)
+    form = _form(d, form_name)
+    if not authz.can(conn, app["id"], ident, "form", form_name, "view_data"):
+        raise Denied()
+    return {"version": app["current_version"], "form": form}
+
+
+def save_form(conn, slug, ident, form_name, values, *, version: int, key: str | None = None) -> dict:
+    """Save a record through a form. Checks run in this order, and a failure stops the save:
+
+    1. The form exists and the user has edit_data on it. Both failures give the same answer.
+    2. The form is from the current version of the application, or the user must reload.
+    3. The record holds only fields that the form binds.
+    4. Every rule on a visible control is true, and every visible required field has a value.
+
+    The form's rules apply to a save through the form. The table routes do not apply them.
+    """
+    app, d = load_app(conn, slug)
+    form = _form(d, form_name)
+    if not authz.can(conn, app["id"], ident, "form", form_name, "edit_data"):
+        raise Denied()
+    if version != app["current_version"]:
+        raise VersionChanged(app["current_version"])
+    if not isinstance(values, dict):
+        raise BadRequest("values must be an object")
+    unknown = formrules.unknown_fields(form, values)
+    if unknown:
+        raise Unprocessable({"error": "unknown_fields", "fields": unknown})
+    # One instant for the whole save, so every rule that uses today() sees the same date.
+    errors = formrules.failed_rules(d.model_dump(mode="json"), form, values, datetime.now(timezone.utc))
+    if errors:
+        raise Unprocessable({"error": "validation", "errors": errors})
+    e = _entity(d, form["entity"])
+    clean = _clean(e, values, for_update=key is not None)
+    _scope(conn, app, ident)
+    return _update(conn, slug, e, key, clean) if key is not None else _insert(conn, slug, e, clean)
 
 
 def delete_record(conn, slug, ident, table, key) -> None:
