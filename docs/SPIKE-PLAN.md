@@ -10,13 +10,13 @@
 
 ## Summary
 
-Four spikes test the assumptions that carry the most risk in the design. Each spike answers one question with a pass or fail result and a written report. The results decide whether the project continues as designed, changes scope, or stops.
+Five spikes test the assumptions that carry the most risk in the design. Each spike answers one question with a pass or fail result and a written report. The results decide whether the project continues as designed, changes scope, or stops.
 
-Spike 1 comes first because it can remove form, report, and VBA conversion from scope. Spikes 2 and 3 can run in parallel after Spike 1 delivers its first extraction results. Spike 4 depends on the hand-translated handlers from Spike 3.
+Spike 1 comes first because it can remove form, report, and VBA conversion from scope. Spikes 2 and 3 can run in parallel after Spike 1 delivers its first extraction results. Spike 4 depends on the hand-translated handlers from Spike 3. Spike 5 depends on the form exports from Spike 1.
 
 ## Ground rules
 
-These rules apply to all four spikes:
+These rules apply to all five spikes:
 
 - Spikes produce knowledge, not product code. Prototype code lives in a `spikes/` directory and is not reused without review.
 - Each spike has a time box. If a spike reaches its limit without a result, it reports what it learned and stops.
@@ -26,7 +26,7 @@ These rules apply to all four spikes:
 
 ## Sample databases
 
-All four spikes use the same set of real databases. The application owner nominates three to five. Together, they must cover these cases:
+All five spikes use the same set of real databases. The application owner nominates three to five. Together, they must cover these cases:
 
 - One small, simple database, as a baseline.
 - One database with many forms and heavy VBA.
@@ -312,21 +312,78 @@ The 5% limit on manual-redesign procedures is strict because a confident but wro
 - If the model passes on translatable procedures but translates manual-redesign procedures, strengthen the classifier and test again before any build.
 - If no model passes, rely on fixed mappings and manual redesign, and ask the data policy owner whether a hosted service can be used for a defined class of procedure.
 
+## Spike 5: form editor
+
+### Question
+
+Can the runtime and the operation model support a visual form editor that lets owners make the common edits safely, and is it better to build the editor or adopt an existing one?
+
+### Time box
+
+An estimate of 10 to 12 working days for one engineer, plus half a day with three test users. The spike starts when Spike 1 has exported at least five forms.
+
+### Method
+
+To evaluate the editor:
+
+1. Take five exported forms from Spike 1. Include a simple form, a form with a subform, a form with combo boxes bound to another table, and a form with conditional visibility.
+2. Build a prototype renderer that draws each form from its definition in the browser.
+3. Ask the application owner to compare each rendered form with the original in Access, and rate it from 1 to 5 for how recognisable and usable it is.
+4. Build a prototype editor with these operations: add, remove, and move a control, change a label, set a visibility rule, set a validation rule, and set a default. Add undo and redo.
+5. Store each edit as an operation in a log. Rebuild the draft from the log alone, and confirm it matches the edited draft exactly.
+6. Test a rename. Rename a field in the editor, and generate the data migration. Apply it to a test PostgreSQL schema, and check that the data survives and that every form, query, and rule that refers to the field is updated. Check that handlers that refer to the field are listed for review.
+7. Test the draft workflow. Lock a draft, publish it, make the new version current, and confirm that an open form from the earlier version receives the version-changed response.
+8. Test permissions. Confirm that a person with the Design application level can edit a draft but cannot publish it.
+9. Run an automated accessibility check on the rendered forms, and test keyboard operation of the editor.
+10. Compare two ways to build the editor: a custom build on a drag-and-drop layout library, and adoption of an existing open source form builder. Record the licence, the fit with the definition model, and the effort for each. Confirm the licence of any library before use.
+11. Run a usability session. Ask three representative users to complete six common edits, such as adding a field to a form, hiding a control for one condition, and adding a validation rule. Record whether each user completes each edit unaided, the time taken, and the errors made.
+
+### Measures
+
+Table 6 lists the measures and the pass conditions.
+
+**Table 6. Spike 5 measures**
+
+| Measure | Pass condition |
+|---|---|
+| Common edit tasks completed unaided in the usability session | 80% or more |
+| Median time for one edit task | Under 3 minutes, as a proposal for the owner to confirm |
+| Rendered forms rated recognisable and usable (4 or 5 out of 5) | At least 4 of 5 forms |
+| Draft rebuilt exactly from the operation log | 100% of test drafts |
+| Rename keeps data and updates every reference in forms, queries, and rules | 100% of test cases |
+| Handlers that refer to a renamed field are listed for review | 100% of test cases |
+| A form with 100 controls renders | Under 2 seconds |
+| Automated accessibility check | No critical violations |
+
+### Outputs
+
+- Report with the usability results and the owner's ratings.
+- Prototype renderer and editor, and the operation model.
+- Comparison of the custom build and an existing form builder, with a recommendation and an effort estimate.
+- List of Access form features that the renderer does not support.
+
+### Decision
+
+- If the measures pass, adopt the recommended approach and size the Phase 2 editor from the estimate.
+- If usability fails but the operation model works, narrow the Phase 2 editor to property-panel editing of fields, labels, and rules, and defer drag-and-drop layout.
+- If the rename test fails, fix the operation model and the reference tracking before any build, because a rename that loses data or leaves broken references makes editing unsafe.
+- If the renderer's fidelity is low, review the scope of form conversion in the PRD.
+
 ## Schedule and dependencies
 
-Table 6 shows the order of work. The durations are estimates, and the owner must confirm them against available people.
+Table 7 shows the order of work. The durations are estimates, and the owner must confirm them against available people.
 
-**Table 6. Schedule**
+**Table 7. Schedule**
 
-| Week | Spike 1 | Spike 2 | Spike 3 | Spike 4 |
-|---|---|---|---|---|
-| Before week 1 | Nominate databases, confirm Access licence and a Windows test machine | | | Arrange a GPU server |
-| 1 | Parts 1a and 1b | | Harness and 10 handlers | |
-| 2 | Parts 1c and 1d, and report | Collect queries, build the prototype | Hostile suite and report | Prepare the evaluation set |
-| 3 | | Compare results and report | | Run models |
-| 4 | | | | Owner rating and report |
-| End of week 3 | Decision meeting on Spikes 1 to 3 | | | |
-| End of week 4 | | | | Decision meeting on Spike 4 |
+| Week | Spike 1 | Spike 2 | Spike 3 | Spike 4 | Spike 5 |
+|---|---|---|---|---|---|
+| Before week 1 | Nominate databases, confirm Access licence and a Windows test machine | | | Arrange a GPU server | Arrange three test users |
+| 1 | Parts 1a and 1b | | Harness and 10 handlers | | |
+| 2 | Parts 1c and 1d, and report | Collect queries, build the prototype | Hostile suite and report | Prepare the evaluation set | Renderer prototype |
+| 3 | | Compare results and report | | Run models | Editor, operation log, rename, and drafts |
+| 4 | | | | Owner rating and report | Usability session and report |
+| End of week 3 | Decision meeting on Spikes 1 to 3 | | | | |
+| End of week 4 | | | | Decision meeting on Spikes 4 and 5 | |
 
 ## Prerequisites
 
@@ -336,6 +393,7 @@ The spikes cannot start until these items exist:
 - The owner's existing PowerShell automation scripts for Access.
 - A Windows Server machine or VM with a licensed copy of Microsoft Access.
 - A GPU server for Spike 4, or a decision on how to obtain one.
+- Three representative users for the Spike 5 usability session, with half a day each.
 - Someone to confirm the licence and support position for Access on a server or in a container.
 
 ## Risks

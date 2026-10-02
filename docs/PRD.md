@@ -106,7 +106,7 @@ Requirements for changes:
 - The system classifies each data change as additive, compatible, or destructive. It applies additive changes automatically, applies compatible changes after a preview, and requires explicit confirmation, a preview of the affected rows, and a snapshot before it applies a destructive change.
 - The permission to design an application is separate from the permission to publish it.
 - Every change to an application's definition appears in the audit log with the difference.
-- Once an owner publishes an edit, the web application is the system of record. Re-import from the original `.accdb` file is then not available for that application. This is a proposal that needs the owner's decision (item O8 in the [decisions log](DECISIONS.md)).
+- Once an owner publishes an edit, the web application is the system of record. Re-import from the original `.accdb` file is then not available for that application. This is decision D12 in the [decisions log](DECISIONS.md).
 
 ### VBA conversion
 
@@ -218,6 +218,7 @@ Table 4 lists the requirements, in priority order within each area. Priority P0 
 | FR-29 | Edit queries and reports | P2 |
 | FR-30 | Edit handlers, with the same sandbox tests and approval as translated handlers | P2 |
 | FR-31 | Record every definition change in the audit log, with the difference | P1 |
+| FR-32 | Let an application require a second approver before a change is published, as a setting for each application | P2 |
 
 ## Non-functional requirements
 
@@ -306,7 +307,6 @@ The [decisions log](DECISIONS.md) records decisions and open items. The items th
 - Which three to five real databases do the pilot and the spikes use?
 - Is a GPU server available to host the translation model, and what is the budget?
 - When the web version goes live, do users stop using the `.accdb` file, and how does the system prevent two diverging copies of the data?
-- Does the web application become the system of record after the first published edit, and does a change to a published application need a second person to approve it?
 - How does the system handle tables linked to SQL Server or other ODBC sources, and tables linked from a back-end file in a split database?
 - Who writes row-level rules for each application, and how?
 - How long does the system keep uploaded files, audit logs, and exports?

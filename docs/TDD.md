@@ -392,7 +392,7 @@ The editor provides these surfaces, in this order of delivery:
 3. Queries and reports: columns, filters, grouping, and sorting. The editor offers a builder first, and a SQL view for experienced designers.
 4. Handlers: a code editor with the sandbox and test runner, under the approval rules in the VBA pipeline.
 
-The editor renders user-entered text, such as labels and messages, with escaping, so that an edit cannot inject script into other users' browsers.
+Spike 5 tests the form editor and the operation model before the build. The editor renders user-entered text, such as labels and messages, with escaping, so that an edit cannot inject script into other users' browsers.
 
 ### Publishing a draft
 
@@ -432,11 +432,11 @@ The runtime validates every request against the current version. When a user has
 
 ### Authorisation and audit
 
-The Design application level lets a person create and edit a draft. Only the Manage application level lets a person publish. A person with both levels can edit and publish their own draft unless the organisation requires a second approver, which is an open question in the [decisions log](DECISIONS.md). The audit store records draft creation, each published version, rollbacks, and snapshot use.
+The Design application level lets a person create and edit a draft. Only the Manage application level lets a person publish. A person with both levels can edit and publish their own draft unless the application is set to require a second approver. Version 1 does not require one by default (decision D13), but the setting exists for each application. The audit store records draft creation, each published version, rollbacks, and snapshot use.
 
 ### Relationship to re-import
 
-Re-import from the original `.accdb` file (FR-12) conflicts with editing, because the source file and the edited application diverge. The design proposes that the web application becomes the system of record after the first published edit. Re-import then stays available only for an application with no published edits. An owner who wants to re-import an edited application creates a separate application. This proposal needs the owner's decision (item O8).
+Re-import from the original `.accdb` file (FR-12) conflicts with editing, because the source file and the edited application diverge. The design makes the web application the system of record after the first published edit. Re-import then stays available only for an application with no published edits. An owner who wants to re-import an edited application creates a separate application. The owner accepted this as decision D12.
 
 ## Platform data model
 
@@ -516,7 +516,7 @@ The test plan has these parts:
 
 ## Delivery plan
 
-Work follows the phases in the PRD. Four spikes come first, because they test the assumptions that carry the most risk. The [spike plan](SPIKE-PLAN.md) gives the method for each. Table 10 lists them.
+Work follows the phases in the PRD. Five spikes come first, because they test the assumptions that carry the most risk. The [spike plan](SPIKE-PLAN.md) gives the method for each. Table 10 lists them.
 
 **Table 10. Spikes**
 
@@ -526,6 +526,7 @@ Work follows the phases in the PRD. Four spikes come first, because they test th
 | 2. Query translation | Can a Jet SQL transpiler convert the organisation's queries? | At least 80% of queries in the same databases convert and return matching results |
 | 3. Handler sandbox | Can a Wasm sandbox run realistic handlers within limits? | Hostile handlers fail safely, and normal handlers run within 100 ms |
 | 4. Local model | Can a locally hosted model translate VBA to approvable handlers? | At least 50% of translatable procedures pass their tests unedited, and no manual-redesign procedure receives a translation |
+| 5. Form editor | Can the runtime and operation model support a visual form editor for the common edits? | At least 80% of common edit tasks completed unaided, and a rename updates every reference |
 
 The owner adopted the thresholds in Table 10 (decision D5) and can revise them before the spikes start.
 

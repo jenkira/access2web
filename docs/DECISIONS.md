@@ -31,6 +31,8 @@ Table 1 lists each decision, its status, and its source.
 | D9 | Plan for AI translation on a private, locally hosted model, and test one in Spike 4 | Accepted | A hosted service stays an option only if the data policy owner approves it later. |
 | D10 | Use OpenID Connect for sign-in unless the portal requires another standard | Provisional | Depends on the portal. See item O1. |
 | D11 | Include editing of migrated applications: drafts, version history, rollback, and safe data changes | Accepted | Added on 2 October 2026. Adds FR-23 to FR-31 to the PRD. |
+| D12 | The web application becomes the system of record after the first published edit. Re-import stays available only for applications with no published edits. An owner who wants to re-import an edited application creates a separate application. | Accepted | Proposed in review, accepted 2 October 2026. |
+| D13 | Do not require a second approver to publish a change in version 1, but make the rule configurable for each application | Accepted | Proposed in review, accepted 2 October 2026. Adds FR-32. |
 
 ## Open items
 
@@ -46,9 +48,7 @@ Table 2 lists the items that still need an answer, who can answer them, and when
 | O4 | Where must data live, and does any application hold personal or health information that needs a privacy review? | Privacy officer | Design is final |
 | O5 | Is a GPU server available for Spike 4, and what is the budget for production hosting? | Platform team | Spike 4 starts |
 | O6 | Who maintains handlers after publication, and who owns an application when its author leaves? | Application owner | Build starts |
-| O7 | How does a re-import (FR-12) merge changes with an owner's edits to the definition? The proposal in O8 would remove the need to merge. | Design team | FR-12 is built (P2) |
-| O8 | Does the web application become the system of record after the first published edit? Proposal: yes. Re-import then stays available only for unedited applications, and an owner who wants to re-import an edited application creates a separate application. | Application owner | Phase 2 design |
-| O9 | Does a change to a published application need a second person to approve it? Proposal: not in version 1, but make the rule configurable for each application. | Application owner, security owner | Phase 2 design |
+| O7 | How does a re-import (FR-12) merge changes with an owner's edits to the definition? Decision D12 removes the need to merge for edited applications, so this item applies only to unedited ones. | Design team | FR-12 is built (P2) |
 
 ## Gaps found in review
 
