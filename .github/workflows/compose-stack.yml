@@ -1,0 +1,53 @@
+name: Compose Stack
+
+# Starts the stack from docker-compose.yml, which is what the Codespace uses, and runs the same end-to-end check as the image
+# workflow through the nginx frontend. It also checks that the PostgreSQL for the backend tests starts. Nothing is pushed.
+
+on:
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "docker-compose.yml"
+      - ".devcontainer/**"
+      - "backend/**"
+      - "web/**"
+      - ".github/scripts/stack_smoke.py"
+      - ".github/workflows/compose-stack.yml"
+  workflow_dispatch: {}
+
+concurrency:
+  group: compose-stack-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  stack:
+    name: compose stack
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Check the Compose file
+        run: docker compose --profile test config -q
+
+      # The development sign-in is on only so that the check can publish an application through the proxy.
+      - name: Start the stack
+        run: A2W_DEV_AUTH=1 docker compose up -d --build --wait
+
+      - name: Check the stack through the frontend
+        run: STACK_DEV_AUTH=1 python3 .github/scripts/stack_smoke.py http://localhost:8080
+
+      - name: Start the PostgreSQL for the backend tests
+        run: docker compose --profile test up -d --wait test-db
+
+      - name: Show the container logs if a step failed
+        if: failure()
+        run: docker compose --profile test logs --tail 60
+
+      - name: Stop the stack
+        if: always()
+        run: docker compose --profile test down -v

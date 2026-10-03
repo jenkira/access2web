@@ -41,6 +41,20 @@ Not built yet: queries (Spike 2), forms and reports (Phase 2), object-level and 
 | `backend/Dockerfile` | Backend image: the API on port 8000 |
 | `web/Dockerfile` | Frontend image: nginx serves the built web files on port 8080 and proxies `/api/` to the backend |
 
+## Run the stack with Docker Compose
+
+`docker-compose.yml` starts PostgreSQL, the backend, and the nginx frontend from your working copy, with the same security settings as the Helm chart. You need Docker with Compose v2.
+
+```sh
+A2W_DEV_AUTH=1 docker compose up --build
+```
+
+Open <http://localhost:8080>. Without `A2W_DEV_AUTH=1` the development sign-in is off, and every API call returns 401. With it on, the backend trusts identity headers from the client, so use it only on a machine you trust. To check the stack end to end, run `STACK_DEV_AUTH=1 python3 .github/scripts/stack_smoke.py http://localhost:8080`. Stop it and delete the data with `docker compose down -v`.
+
+### In a GitHub Codespace
+
+The repository has a dev container. In GitHub, select **Code** > **Codespaces** > **Create codespace on main**. On creation it installs the dependencies and starts a PostgreSQL for the backend tests on port 54329, so `cd backend && python -m pytest` works without more setup. Run the stack with the command above, and open port 8080 from the **Ports** tab. The Compose Stack workflow runs the same stack in CI.
+
 ## Run the tests
 
 You need Python 3.11 or later and a PostgreSQL 16 server on which you can create databases and roles.
@@ -194,6 +208,7 @@ GitHub Actions runs the checks in Table 5 on every pull request. The workflows a
 | Frontend Tests | Type-check and build of `web/`. The form editor's tests, in Chrome, against the prototype server and against the real backend with PostgreSQL. | Pull request |
 | Spike Tests | The Spike 2 transpiler tests and the Spike 3 sandbox tests. | Pull request |
 | Build and Push to GHCR | Builds the backend and frontend images, starts them with PostgreSQL as the Helm chart runs them (non-root, read-only file system, no capabilities), publishes an application through the frontend, and scans both images with Trivy. It fails on a fixable critical finding. It pushes `access2web-backend` and `access2web-frontend` to GHCR on pushes to `main` and on `v*` tags. | Pull request, push to `main`, tag |
+| Compose Stack | Starts the stack from `docker-compose.yml`, publishes an application through the frontend, and checks that the test database starts. | Pull request, for stack changes |
 | Verify Helm Chart | Lints the chart, renders it five ways, checks that development sign-in is off by default, validates the manifests with kubeconform, checks that `VERSION`, the chart, the two image tags, and `pyproject.toml` agree, and packages the chart. | Pull request and push, for chart changes |
 | Security Scan | `pip-audit` and `npm audit` (fail on a high finding), Trivy for the files and configuration, and gitleaks for secrets. | Pull request, and Mondays |
 | Semgrep | Security rules for Python, FastAPI, JavaScript, and TypeScript, at a pinned rules commit. It reports and does not fail yet. | Pull request, and Mondays |
