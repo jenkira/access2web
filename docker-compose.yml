@@ -1,0 +1,94 @@
+# Runs the whole stack from your working copy, the way the Helm chart runs it: PostgreSQL, a one-time bootstrap, the backend,
+# and the nginx frontend. The containers are as locked down as in CI (read-only root file system, no capabilities, non-root).
+#
+#   docker compose up --build                      start the stack, then open http://localhost:8080
+#   A2W_DEV_AUTH=1 docker compose up --build       the same, with the development sign-in on (see below)
+#   docker compose --profile test up -d test-db    only a PostgreSQL for the backend tests (port 54329)
+#   docker compose down -v                         stop everything and delete the data
+#
+# The development sign-in trusts identity headers from the client, so it is off unless you set A2W_DEV_AUTH=1. Do not expose
+# the stack to a network you do not trust with it on. The database password below is a development value.
+
+name: access2web
+
+x-hardening: &hardening
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+
+services:
+  db:
+    image: postgres:16
+    <<: *hardening
+    user: "999:999"
+    environment:
+      POSTGRES_USER: access2web
+      POSTGRES_PASSWORD: dev-password
+      POSTGRES_DB: access2web
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    tmpfs:
+      - /var/run/postgresql:uid=999,gid=999
+      - /tmp:uid=999,gid=999
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U access2web -d access2web"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  # Creates the control schema and the citext extension. It is safe to run again.
+  bootstrap:
+    build: ./backend
+    <<: *hardening
+    command: ["python", "-c", "from a2w import db; db.bootstrap()"]
+    environment:
+      A2W_DATABASE_URL: postgresql://access2web:dev-password@db:5432/access2web
+    depends_on:
+      db: { condition: service_healthy }
+    restart: "no"
+
+  backend:
+    build: ./backend
+    <<: *hardening
+    environment:
+      A2W_DATABASE_URL: postgresql://access2web:dev-password@db:5432/access2web
+      A2W_DEV_AUTH: ${A2W_DEV_AUTH:-0}
+    depends_on:
+      bootstrap: { condition: service_completed_successfully }
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz')"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  frontend:
+    build: ./web
+    <<: *hardening
+    environment:
+      BACKEND_URL: http://backend:8000
+    ports:
+      - "127.0.0.1:8080:8080"
+    tmpfs:
+      - /tmp:uid=101,gid=101
+      - /etc/nginx/conf.d:uid=101,gid=101
+    depends_on:
+      backend: { condition: service_healthy }
+
+  # Only for the backend tests: the tests create and drop their own databases, so they need a superuser. These values match the
+  # defaults in backend/tests/conftest.py.
+  test-db:
+    image: postgres:16
+    profiles: ["test"]
+    environment:
+      POSTGRES_PASSWORD: test
+    ports:
+      - "127.0.0.1:54329:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  db-data:
