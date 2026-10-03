@@ -1,0 +1,101 @@
+name: Verify Helm Chart
+
+# Lints the chart, renders it with the settings that change what it produces, checks the rendered manifests against the
+# Kubernetes schemas, checks that the versions agree, and packages the chart. The package is uploaded as an artifact and is
+# not committed.
+
+on:
+  push:
+    branches: ["main"]
+    paths: ["deploy/helm/**", "VERSION", "backend/pyproject.toml"]
+  pull_request:
+    branches: ["main"]
+    paths: ["deploy/helm/**", "VERSION", "backend/pyproject.toml", ".github/workflows/helm-chart.yml"]
+  workflow_dispatch: {}
+
+concurrency:
+  group: helm-chart-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  HELM_VERSION: "3.16.4"
+  KUBECONFORM_VERSION: "0.6.7"
+  KUBERNETES_VERSION: "1.28.0"
+  CHART: deploy/helm/access2web
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v5
+        with:
+          version: v${{ env.HELM_VERSION }}
+
+      - name: Lint the chart
+        run: helm lint "$CHART"
+
+      # One version, in the VERSION file, is used for the image tag, the chart, and the Python package.
+      - name: Check that the versions agree
+        id: version
+        run: |
+          set -euo pipefail
+          version="$(cat VERSION)"
+          chart="$(sed -n 's/^version: *//p' "$CHART/Chart.yaml" | tr -d '"')"
+          app="$(sed -n 's/^appVersion: *//p' "$CHART/Chart.yaml" | tr -d '"')"
+          py="$(sed -n 's/^version = "\(.*\)"/\1/p' backend/pyproject.toml)"
+          tag="$(sed -n 's/^ *tag: *//p' "$CHART/values.yaml" | tr -d '"')"
+          echo "VERSION=$version chart=$chart appVersion=$app pyproject=$py image tag=$tag"
+          for pair in "chart:$chart" "appVersion:$app" "pyproject:$py" "image tag:$tag"; do
+            if [ "${pair#*:}" != "$version" ]; then
+              echo "::error::${pair%%:*} is ${pair#*:}, and VERSION is $version"; exit 1
+            fi
+          done
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      # The chart has two switches that change what it renders: devAuth and the ingress. Render each way.
+      - name: Render the chart
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/rendered
+          helm template access2web "$CHART" > /tmp/rendered/default.yaml
+          helm template access2web "$CHART" --set devAuth=true > /tmp/rendered/dev-auth.yaml
+          helm template access2web "$CHART" --set ingress.enabled=true > /tmp/rendered/ingress.yaml
+          helm template access2web "$CHART" --set ingress.enabled=true --set ingress.className=nginx \
+            --set ingress.tlsSecret=access2web-tls > /tmp/rendered/ingress-tls.yaml
+
+      # The development sign-in trusts identity headers from the client. It must be off unless someone turns it on.
+      - name: Check that development sign-in is off by default
+        run: |
+          set -euo pipefail
+          if grep -q A2W_DEV_AUTH /tmp/rendered/default.yaml /tmp/rendered/ingress.yaml /tmp/rendered/ingress-tls.yaml; then
+            echo "::error::A2W_DEV_AUTH is set in a render that did not ask for devAuth"; exit 1
+          fi
+          grep -q A2W_DEV_AUTH /tmp/rendered/dev-auth.yaml
+
+      - name: Check the rendered manifests against the Kubernetes schemas
+        run: |
+          set -euo pipefail
+          curl -sSL --fail "https://github.com/yannh/kubeconform/releases/download/v${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz" \
+            | tar -xz -C /tmp kubeconform
+          /tmp/kubeconform -strict -summary -kubernetes-version "$KUBERNETES_VERSION" /tmp/rendered/*.yaml
+
+      - name: Package the chart
+        run: |
+          helm package "$CHART" \
+            --version "${{ steps.version.outputs.version }}" \
+            --app-version "${{ steps.version.outputs.version }}" \
+            --destination /tmp/helm-build
+
+      - name: Upload the package
+        uses: actions/upload-artifact@v7
+        with:
+          name: helm-chart
+          path: /tmp/helm-build/*.tgz
+          retention-days: 30

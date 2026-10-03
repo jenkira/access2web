@@ -181,11 +181,35 @@ The backend decides every permission. The page shows what it is told, so a perso
 
 Without `app=` in the address, the page uses the prototype's own server, as in the Spike 5 report.
 
+## Continuous integration
+
+GitHub Actions runs the checks in Table 5 on every pull request. The workflows are in `.github/workflows/`, and follow the pattern of the `jenkira/eidon` repository.
+
+**Table 5. Workflows**
+
+| Workflow | What it checks | When it runs |
+|---|---|---|
+| Backend Tests | The backend's pytest suite against PostgreSQL 16, including the differential test of the Python and TypeScript evaluators. CI makes a missing Node a failure and not a skip. | Pull request |
+| Frontend Tests | Type-check and build of `web/`. The form editor's tests, in Chrome, against the prototype server and against the real backend with PostgreSQL. | Pull request |
+| Spike Tests | The Spike 2 transpiler tests and the Spike 3 sandbox tests. | Pull request |
+| Build and Push to GHCR | Builds the image, starts it as the Helm chart runs it (non-root, read-only file system, no capabilities), checks `/healthz`, the web front end, and a 401 for an unauthenticated call, and scans it with Trivy. It fails on a fixable critical finding. It pushes to GHCR on pushes to `main` and on `v*` tags. | Pull request, push to `main`, tag |
+| Verify Helm Chart | Lints the chart, renders it four ways, checks that development sign-in is off by default, validates the manifests with kubeconform, checks that `VERSION`, the chart, the image tag, and `pyproject.toml` agree, and packages the chart. | Pull request and push, for chart changes |
+| Security Scan | `pip-audit` and `npm audit` (fail on a high finding), Trivy for the files and configuration, and gitleaks for secrets. | Pull request, and Mondays |
+| Semgrep | Security rules for Python, FastAPI, JavaScript, and TypeScript, at a pinned rules commit. It reports and does not fail yet. | Pull request, and Mondays |
+| SBOM | CycloneDX bills of materials for the backend, the web front end, and the editor, attached to a release on a tag. | Pull request and tag |
+| Tag release on VERSION change | Pushes `v<VERSION>` when `VERSION` changes on `main`. | Push to `main` |
+
+Dependabot opens weekly update pull requests for the Python and npm dependencies, the Dockerfile, and the workflows.
+
+`VERSION` holds the one version number. Change it, `backend/pyproject.toml`, `Chart.yaml`, and the image tag in `values.yaml` together, and the Helm workflow fails if they differ.
+
+To require these checks before a merge, add their names to the branch protection rule for `main`. The workflows that run only for some paths (Verify Helm Chart) are not suitable as required checks. Uploads to code scanning are best effort, because a private repository needs GitHub Code Security for them.
+
 ## Configuration
 
-Table 5 lists the environment variables.
+Table 6 lists the environment variables.
 
-**Table 5. Environment variables**
+**Table 6. Environment variables**
 
 | Variable | Purpose |
 |---|---|

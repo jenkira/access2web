@@ -1,0 +1,93 @@
+name: SBOM
+
+# Generates CycloneDX Software Bills of Materials for the backend (Python), the web front end, and the form editor (npm).
+# Each is uploaded as an artifact on every run, and attached to the GitHub Release when a version tag is pushed.
+
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+    branches: ["main"]
+  workflow_dispatch:
+
+concurrency:
+  group: sbom-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  backend-sbom:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # attach the SBOM to a release on a tag
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+
+      - name: Generate the CycloneDX SBOM (Python)
+        run: |
+          python -m venv /tmp/venv
+          /tmp/venv/bin/pip install ./backend cyclonedx-bom
+          # Describes the full installed dependency graph, transitive packages included.
+          /tmp/venv/bin/cyclonedx-py environment /tmp/venv \
+            --output-format JSON \
+            --output-file sbom-backend.cdx.json
+
+      - name: Upload the backend SBOM
+        uses: actions/upload-artifact@v7
+        with:
+          name: sbom-backend
+          path: sbom-backend.cdx.json
+
+      - name: Attach to the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v3
+        with:
+          files: sbom-backend.cdx.json
+
+  npm-sbom:
+    name: ${{ matrix.name }} SBOM
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # attach the SBOM to a release on a tag
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: web
+            dir: web
+          - name: editor
+            dir: spikes/spike5-form-editor
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: ${{ matrix.dir }}/package-lock.json
+
+      - name: Generate the CycloneDX SBOM (npm)
+        working-directory: ${{ matrix.dir }}
+        run: |
+          npm ci --ignore-scripts
+          npx --yes @cyclonedx/cyclonedx-npm --output-format JSON --output-file "$GITHUB_WORKSPACE/sbom-${{ matrix.name }}.cdx.json"
+
+      - name: Upload the SBOM
+        uses: actions/upload-artifact@v7
+        with:
+          name: sbom-${{ matrix.name }}
+          path: sbom-${{ matrix.name }}.cdx.json
+
+      - name: Attach to the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v3
+        with:
+          files: sbom-${{ matrix.name }}.cdx.json

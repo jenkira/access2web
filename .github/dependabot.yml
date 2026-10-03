@@ -1,0 +1,49 @@
+version: 2
+# Dependency update pull requests. Minor and patch updates are grouped to keep the noise down, and a major update comes as
+# its own pull request.
+updates:
+  - package-ecosystem: pip
+    directory: /backend
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    groups:
+      backend-minor-patch:
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: npm
+    directory: /web
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    groups:
+      web-minor-patch:
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: npm
+    directory: /spikes/spike5-form-editor
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    groups:
+      editor-minor-patch:
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: npm
+    directory: /spikes/spike3-sandbox
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    groups:
+      sandbox-minor-patch:
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

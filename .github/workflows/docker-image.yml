@@ -1,0 +1,152 @@
+name: Build and Push to GHCR
+
+# Builds the image from the Dockerfile at the repository root, checks that it starts the way the Helm chart runs it, and
+# scans it for vulnerabilities. The image is pushed to GHCR only on pushes to main and on version tags, never for a pull
+# request.
+#
+# The image is built once into the local Docker daemon, tested and scanned there, and only then built again for the push.
+# The second build reuses the cache from the first, so it only adds the push.
+
+on:
+  push:
+    branches: ["main"]
+    tags: ["v*"]
+  pull_request:
+    branches: ["main"]
+  workflow_dispatch:
+
+# A superseded pull request run is cancelled. Pushes to main and tags have their own group through github.ref, so a real
+# release build is never cancelled by unrelated activity.
+concurrency:
+  group: docker-image-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE: ghcr.io/${{ github.repository }}
+
+jobs:
+  build:
+    name: build, test, scan, push
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      security-events: write # best-effort SARIF upload only
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      # Canonical SemVer, single-sourced from the top-level VERSION file.
+      - name: Read application version
+        id: version
+        run: echo "version=$(cat VERSION)" >> "$GITHUB_OUTPUT"
+
+      - name: Build the image into the local daemon
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: false
+          load: true
+          tags: access2web:ci
+          cache-from: type=gha,scope=access2web
+          cache-to: type=gha,mode=max,scope=access2web
+
+      # Run the image as the Helm chart does: a non-root user, a read-only root file system, no capabilities, and no
+      # privilege escalation. A missing file, a write to the image's file system, or a wrong user shows up here, not in the
+      # cluster.
+      - name: Smoke test the image under the chart's security settings
+        run: |
+          set -euo pipefail
+          user="$(docker run --rm --entrypoint id access2web:ci -u)"
+          if [ "$user" != "10001" ]; then echo "::error::the image runs as uid $user, and the chart expects 10001"; exit 1; fi
+          docker run -d --name a2w -p 8000:8000 \
+            --read-only --cap-drop ALL --security-opt no-new-privileges \
+            access2web:ci
+          up=""
+          for _ in $(seq 1 30); do
+            if curl -fsS http://localhost:8000/healthz >/dev/null 2>&1; then up=yes; break; fi
+            sleep 1
+          done
+          if [ -z "$up" ]; then docker logs a2w; echo "::error::the container did not become healthy"; exit 1; fi
+          # The built web front end is served, and an unauthenticated API call is refused, not a server error.
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8000/)" = "200"
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8000/api/apps/none)" = "401"
+
+      - name: Show the container log if the smoke test failed
+        if: failure()
+        run: docker logs a2w || true
+
+      # Report every fixable high or critical finding in the log and in the artifact, without failing the run.
+      - name: Scan the image (report)
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: access2web:ci
+          scanners: vuln
+          format: sarif
+          output: trivy-image.sarif
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+
+      - name: Upload the scan to code scanning (best effort)
+        if: always()
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy-image.sarif
+
+      - name: Upload the scan as an artifact
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: trivy-image-results
+          path: trivy-image.sarif
+          retention-days: 30
+
+      # Fail the run on a critical finding that has a fix. High findings are reported above and do not fail the run.
+      - name: Scan the image (gate on fixable critical findings)
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: access2web:ci
+          scanners: vuln
+          format: table
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        if: github.event_name != 'pull_request'
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix=sha-,format=short
+            type=raw,value=${{ steps.version.outputs.version }}
+          labels: |
+            org.opencontainers.image.version=${{ steps.version.outputs.version }}
+
+      - name: Push
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=access2web

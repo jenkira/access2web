@@ -1,0 +1,142 @@
+name: Frontend Tests
+
+# Type-checks and builds the web front end, and runs the form editor's tests: the model and expression tests, and the
+# browser tests in Chromium against the prototype server and against the real Python backend with PostgreSQL.
+#
+# The trigger is the pull request only. See backend-tests.yml for the reason.
+
+on:
+  pull_request:
+    branches: ["main"]
+  workflow_dispatch:
+
+concurrency:
+  group: frontend-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read # dorny/paths-filter needs this to list the changed files
+    outputs:
+      web: ${{ steps.filter.outputs.web }}
+      editor: ${{ steps.filter.outputs.editor }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: filter
+        uses: dorny/paths-filter@v4
+        with:
+          filters: |
+            web:
+              - 'web/**'
+              - '.github/workflows/frontend-tests.yml'
+            editor:
+              - 'spikes/spike5-form-editor/**'
+              - 'spec/**'
+              - 'backend/**'
+              - '.github/workflows/frontend-tests.yml'
+
+  web:
+    name: web (typecheck and build)
+    needs: changes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Node
+        if: needs.changes.outputs.web == 'true'
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        if: needs.changes.outputs.web == 'true'
+        run: npm ci
+
+      - name: Type-check
+        if: needs.changes.outputs.web == 'true'
+        run: npm run typecheck
+
+      - name: Build
+        if: needs.changes.outputs.web == 'true'
+        run: npm run build
+
+  editor:
+    name: form editor (tests)
+    needs: changes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    defaults:
+      run:
+        working-directory: spikes/spike5-form-editor
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Node
+        if: needs.changes.outputs.editor == 'true'
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22" # the tests run TypeScript with --experimental-strip-types, which needs 22.6 or later
+          cache: npm
+          cache-dependency-path: spikes/spike5-form-editor/package-lock.json
+
+      # Some editor tests start the real Python backend and drive the editor against it.
+      - name: Set up Python
+        if: needs.changes.outputs.editor == 'true'
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+
+      - name: Install the backend
+        if: needs.changes.outputs.editor == 'true'
+        run: pip install ../../backend
+
+      - name: Install dependencies
+        if: needs.changes.outputs.editor == 'true'
+        run: npm ci
+
+      - name: Type-check
+        if: needs.changes.outputs.editor == 'true'
+        run: npm run typecheck
+
+      # The runner has Google Chrome installed. The tests drive it with playwright-core, so no browser download is needed.
+      - name: Run tests
+        if: needs.changes.outputs.editor == 'true'
+        env:
+          CHROMIUM: /usr/bin/google-chrome
+          A2W_SPIKE_ADMIN_URL: postgresql://postgres:test@127.0.0.1:5432/postgres
+        run: npm test
+
+      - name: Upload browser results and screenshots
+        if: always() && needs.changes.outputs.editor == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: editor-browser-results
+          path: spikes/spike5-form-editor/work/
+          if-no-files-found: ignore
+          retention-days: 30

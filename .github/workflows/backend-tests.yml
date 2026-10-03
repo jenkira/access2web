@@ -1,0 +1,90 @@
+name: Backend Tests
+
+# Runs the Python backend's tests against PostgreSQL 16 on every pull request. The tests create their own database and
+# drop it afterwards, and the differential test needs Node to run the TypeScript expression evaluator.
+#
+# The trigger is the pull request only, because main advances only through a tested pull request. workflow_dispatch is
+# the manual way to test main directly. A run that has been superseded by a newer push to the same pull request is
+# cancelled.
+
+on:
+  pull_request:
+    branches: ["main"]
+  workflow_dispatch:
+
+concurrency:
+  group: backend-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pytest:
+    name: pytest
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read # dorny/paths-filter needs this to list the changed files
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      # The job always runs and reports a status, so "Backend Tests" stays a valid required check. Only the steps are
+      # skipped when nothing the backend depends on has changed. The shared expression vectors in spec/ and the
+      # TypeScript evaluator in the editor are inputs to the backend tests, so they count as backend changes.
+      - name: Detect backend changes
+        id: filter
+        uses: dorny/paths-filter@v4
+        with:
+          filters: |
+            backend:
+              - 'backend/**'
+              - 'spec/**'
+              - 'spikes/spike5-form-editor/src/model/**'
+              - 'spikes/spike5-form-editor/tools/**'
+              - '.github/workflows/backend-tests.yml'
+
+      - name: Set up Python
+        if: steps.filter.outputs.backend == 'true'
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+
+      # The differential test runs the TypeScript evaluator with --experimental-strip-types, which needs Node 22.6 or later.
+      - name: Set up Node
+        if: steps.filter.outputs.backend == 'true'
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+
+      - name: Install the backend
+        if: steps.filter.outputs.backend == 'true'
+        run: pip install -e "backend[test]"
+
+      - name: Run tests
+        if: steps.filter.outputs.backend == 'true'
+        working-directory: backend
+        env:
+          A2W_TEST_ADMIN_URL: postgresql://postgres:test@localhost:5432/postgres
+          # Fail, and do not skip, if Node is missing: the Python and TypeScript evaluators must agree.
+          A2W_REQUIRE_DIFFERENTIAL: "1"
+        run: python -m pytest -ra --junitxml=../test-results/backend-junit.xml
+
+      - name: Upload test results
+        if: always() && steps.filter.outputs.backend == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: backend-test-results
+          path: test-results/backend-junit.xml
+          retention-days: 30
