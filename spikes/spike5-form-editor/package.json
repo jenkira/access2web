@@ -16,7 +16,7 @@
     "pg": "^8.12.0"
   },
   "devDependencies": {
-    "@types/node": "^22.0.0",
+    "@types/node": "^26.6.3",
     "@types/pg": "^8.11.0",
     "axe-core": "^4.10.0",
     "playwright-core": "^1.48.0",
