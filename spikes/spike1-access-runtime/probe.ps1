@@ -8,6 +8,8 @@ $ErrorActionPreference = 'Stop'
 New-Item -ItemType Directory -Force -Path $Work | Out-Null
 $script:results = New-Object System.Collections.Generic.List[object]
 $script:access = $null
+$script:exe = $null
+$script:t0 = Get-Date
 
 function Probe([string]$Name, [scriptblock]$Body) {
     try {
@@ -48,9 +50,52 @@ Probe 'create a sample .accdb with ACE' {
     "$((Get-Item $db).Length) bytes"
 }
 
-Probe 'start Access.Application' {
+function Start-AccessCom {
     $script:access = New-Object -ComObject Access.Application
     "version $($script:access.Version), build $($script:access.Build)"
+}
+
+Probe 'start Access.Application' { Start-AccessCom }
+
+# If Access would not start, find out why, and try the usual remedies.
+if (-not $script:access) {
+    Probe 'diagnostics: session' {
+        "user=$env:USERNAME interactive=$([Environment]::UserInteractive) session=$([Diagnostics.Process]::GetCurrentProcess().SessionId)"
+    }
+
+    Probe 'diagnostics: COM registration' {
+        $k = 'Registry::HKEY_CLASSES_ROOT\CLSID\{73A4C9C1-D68D-11D0-98BF-00A0C90DC8D9}\LocalServer32'
+        $v = (Get-ItemProperty $k).'(default)'
+        $script:exe = ($v -replace '^"?([^"]+\.exe).*$', '$1')
+        "$v (exists = $(Test-Path $script:exe))"
+    }
+
+    Probe 'diagnostics: launch MSACCESS.EXE directly with the sample database' {
+        if (-not $script:exe) { throw 'no executable path from the COM registration' }
+        $p = Start-Process -FilePath $script:exe -ArgumentList "`"$db`"" -PassThru
+        Start-Sleep -Seconds 15
+        $p.Refresh()
+        if ($p.HasExited) { $state = "exited with code $($p.ExitCode)" }
+        else { $state = "running, window title '$($p.MainWindowTitle)', responding = $($p.Responding)"; Stop-Process -Id $p.Id -Force }
+        $state
+    }
+
+    Probe 'diagnostics: recent Application event log entries' {
+        $ev = Get-WinEvent -FilterHashtable @{ LogName = 'Application'; StartTime = $script:t0 } -MaxEvents 12 -ErrorAction SilentlyContinue
+        $lines = foreach ($e in $ev) {
+            $m = ($e.Message -split "`n")[0]
+            if ($m.Length -gt 300) { $m = $m.Substring(0, 300) }
+            "[$($e.ProviderName) $($e.Id)] $m"
+        }
+        if ($lines) { $lines -join ' || ' } else { 'no events' }
+    }
+
+    Probe 'retry start after /regserver' {
+        if (-not $script:exe) { throw 'no executable path' }
+        & $script:exe /regserver | Out-Null
+        Start-Sleep -Seconds 5
+        Start-AccessCom
+    }
 }
 
 if ($script:access) {

@@ -55,6 +55,22 @@ jobs:
           Write-Host "install took $($sw.Elapsed)"
           Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Office\ClickToRun\Configuration' | Select-Object ProductReleaseIds, VersionToReport | Format-List
 
+      # The first run could not start Access (0x80080005). Set the per-user values that suppress the first-run dialogs, and create
+      # the profile folders that Office automation expects, before the probes.
+      - name: Prepare for Office automation
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          foreach ($d in 'C:\Windows\System32\config\systemprofile\Desktop', 'C:\Windows\SysWOW64\config\systemprofile\Desktop') {
+            New-Item -ItemType Directory -Force -Path $d | Out-Null
+          }
+          $office = 'HKCU:\Software\Microsoft\Office\16.0'
+          foreach ($k in "$office\Common\General", "$office\Registration", "$office\FirstRun") { New-Item -Path $k -Force | Out-Null }
+          Set-ItemProperty "$office\Common\General" -Name ShownFirstRunOptin -Value 1 -Type DWord
+          Set-ItemProperty "$office\Registration" -Name AcceptAllEulas -Value 1 -Type DWord
+          Set-ItemProperty "$office\FirstRun" -Name BootedRTM -Value 1 -Type DWord
+          Set-ItemProperty "$office\FirstRun" -Name disablemovie -Value 1 -Type DWord
+
       - name: Run the probes
         timeout-minutes: 10
         shell: powershell
