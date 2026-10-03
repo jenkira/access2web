@@ -109,7 +109,7 @@ jobs:
       # Some editor tests start the real Python backend and drive the editor against it.
       - name: Set up Python
         if: needs.changes.outputs.editor == 'true'
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: "3.11"
           cache: pip
