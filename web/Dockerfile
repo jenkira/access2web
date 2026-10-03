@@ -8,7 +8,7 @@ RUN npm run build
 
 # A generic nginx that runs as a non-root user and listens on 8080. It serves the built files, and proxies /api/ to the backend.
 # The image's entrypoint fills ${BACKEND_URL} into the template when the container starts.
-FROM nginxinc/nginx-unprivileged:1.27-alpine
+FROM nginxinc/nginx-unprivileged:1.31-alpine
 # The base image can lag behind Alpine's security fixes, and CI fails the build on a fixable critical finding, so upgrade the
 # packages here. The image still runs as the unprivileged user.
 USER root
