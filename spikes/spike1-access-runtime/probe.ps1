@@ -89,6 +89,20 @@ if (-not $script:access) {
         $script:attached = $true
         "attached; version $($obj.Version), build $($obj.Build)"
     }
+
+    # The instance started above is still running with the sample database open. Try binding to the database file by name, in a
+    # separate process with a time limit, because the call can start a new Access or block.
+    if (-not $script:access) {
+        Probe 'GetObject on the database file (file moniker) while Access has it open' {
+            $j = Start-Job -ArgumentList $db -ScriptBlock {
+                param($path)
+                Add-Type -AssemblyName Microsoft.VisualBasic
+                try { $o = [Microsoft.VisualBasic.Interaction]::GetObject($path); "bound; type $($o.GetType().FullName)" }
+                catch { "error: $($_.Exception.Message)" }
+            }
+            if (Wait-Job $j -Timeout 40) { $r = Receive-Job $j; Remove-Job $j -Force; $r } else { Stop-Job $j; Remove-Job $j -Force; throw 'timed out after 40 seconds' }
+        }
+    }
 }
 
 if ($script:access) {
@@ -140,6 +154,70 @@ if ($script:access) {
         $script:access.SaveAsText(5, 'ModProbe', $out)
         "$((Get-Item $out).Length) bytes"
     }
+}
+
+# DAO through the ACE database engine reads a database without starting the Access application.
+$script:dao = $null
+Probe 'DAO via ACE (no Access process): open the sample database read-only' {
+    $dbe = New-Object -ComObject DAO.DBEngine.120
+    $script:dao = $dbe.OpenDatabase($db, $false, $true)
+    "DAO engine version $($dbe.Version)"
+}
+
+if ($script:dao) {
+    Probe 'DAO via ACE: tables, fields, indexes, relations, queries' {
+        $t = @($script:dao.TableDefs | Where-Object { -not ($_.Attributes -band -2147483648) -and -not $_.Name.StartsWith('MSys') -and -not $_.Name.StartsWith('~') })
+        $fields = 0; $indexes = 0
+        foreach ($x in $t) { $fields += $x.Fields.Count; $indexes += $x.Indexes.Count }
+        $q = @($script:dao.QueryDefs | Where-Object { -not $_.Name.StartsWith('~') })
+        "tables=$($t.Count) fields=$fields indexes=$indexes relations=$($script:dao.Relations.Count) queries=$($q.Count) ($(($q | ForEach-Object { $_.Name }) -join ', '))"
+    }
+
+    Probe 'DAO via ACE: field details the importer needs' {
+        $td = $script:dao.TableDefs.Item('Customers')
+        $out = foreach ($f in $td.Fields) {
+            "$($f.Name): type=$($f.Type) size=$($f.Size) required=$($f.Required) autoincrement=$([bool]($f.Attributes -band 16)) allowZeroLength=$(try { $f.AllowZeroLength } catch { 'n/a' })"
+        }
+        $out -join ' | '
+    }
+
+    Probe 'DAO via ACE: indexes and relations' {
+        $ix = foreach ($i in $script:dao.TableDefs.Item('Customers').Indexes) { "$($i.Name) primary=$($i.Primary) unique=$($i.Unique)" }
+        $rel = foreach ($r in $script:dao.Relations) { "$($r.Name): $($r.Table) -> $($r.ForeignTable) attributes=$($r.Attributes)" }
+        "indexes: $($ix -join '; ') || relations: $($rel -join '; ')"
+    }
+
+    Probe 'DAO via ACE: read rows with their types' {
+        $rs = $script:dao.OpenRecordset('SELECT * FROM Customers ORDER BY Id')
+        $rows = while (-not $rs.EOF) {
+            ($rs.Fields | ForEach-Object { "$($_.Name)=$($_.Value) [$($_.Value.GetType().Name)]" }) -join ', '
+            $rs.MoveNext()
+        }
+        $rs.Close()
+        $rows -join ' || '
+    }
+
+    Probe 'DAO via ACE: query SQL' {
+        $q = $script:dao.QueryDefs.Item('ActiveCustomers')
+        $q.SQL.Trim()
+    }
+
+    Probe 'DAO via ACE: inventory of forms, reports, macros, modules (names only)' {
+        $out = foreach ($c in 'Forms', 'Reports', 'Scripts', 'Modules') {
+            $n = 0; foreach ($d in $script:dao.Containers.Item($c).Documents) { $n++ }
+            "$c=$n"
+        }
+        $out -join ' '
+    }
+
+    Probe 'DAO via ACE: read MSysObjects' {
+        $rs = $script:dao.OpenRecordset("SELECT Name, Type FROM MSysObjects WHERE Name NOT LIKE 'MSys*' AND Name NOT LIKE '~*' ORDER BY Name")
+        $rows = while (-not $rs.EOF) { "$($rs.Fields.Item('Name').Value)=$($rs.Fields.Item('Type').Value)"; $rs.MoveNext() }
+        $rs.Close()
+        $rows -join ', '
+    }
+
+    try { $script:dao.Close() } catch { }
 }
 
 # Close Access, and kill it if it does not exit.
