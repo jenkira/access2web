@@ -1,0 +1,92 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-backend
+  labels:
+    {{- include "a2w.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backend
+spec:
+  replicas: {{ .Values.backend.replicas }}
+  selector:
+    matchLabels:
+      {{- include "a2w.selector" (dict "root" . "component" "backend") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "a2w.selector" (dict "root" . "component" "backend") | nindent 8 }}
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile: { type: RuntimeDefault }
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              {{- include "a2w.selector" (dict "root" . "component" "backend") | nindent 14 }}
+      # Creates the control schema and the citext extension if they are not there yet. It is safe to run again, and it retries
+      # while the database is starting.
+      initContainers:
+        - name: bootstrap
+          image: "{{ .Values.backend.image.repository }}:{{ .Values.backend.image.tag }}"
+          command:
+            - sh
+            - -c
+            - 'for i in $(seq 1 60); do python -c "from a2w import db; db.bootstrap()" && exit 0; sleep 2; done; exit 1'
+          env:
+            - name: A2W_DATABASE_URL
+              valueFrom:
+                secretKeyRef: { name: {{ include "a2w.databaseSecret" . }}, key: url }
+          resources:
+            {{- toYaml .Values.backend.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+      containers:
+        - name: api
+          image: "{{ .Values.backend.image.repository }}:{{ .Values.backend.image.tag }}"
+          ports: [{ containerPort: 8000 }]
+          env:
+            - name: A2W_DATABASE_URL
+              valueFrom:
+                secretKeyRef: { name: {{ include "a2w.databaseSecret" . }}, key: url }
+            {{- if .Values.backend.devAuth }}
+            - { name: A2W_DEV_AUTH, value: "1" }
+            {{- end }}
+          readinessProbe: { httpGet: { path: /healthz, port: 8000 } }
+          livenessProbe: { httpGet: { path: /healthz, port: 8000 }, initialDelaySeconds: 10 }
+          resources:
+            {{- toYaml .Values.backend.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-backend
+  labels:
+    {{- include "a2w.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backend
+spec:
+  selector:
+    {{- include "a2w.selector" (dict "root" . "component" "backend") | nindent 4 }}
+  ports: [{ port: 80, targetPort: 8000 }]
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ .Release.Name }}-backend
+  labels:
+    {{- include "a2w.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backend
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      {{- include "a2w.selector" (dict "root" . "component" "backend") | nindent 6 }}
