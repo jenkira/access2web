@@ -1,0 +1,12 @@
+Version =21
+VersionRequired =20
+Begin Form
+    Width =4320
+    DatasheetFontHeight =11
+    Begin
+        Begin Section
+            Height =720
+            Name ="Detail"
+        End
+    End
+End

@@ -1,0 +1,85 @@
+name: Spike 1 Access Runtime
+
+# Installs the free Microsoft 365 Access Runtime on a Windows Server 2022 runner and probes what it allows when Access is driven
+# through COM: starting it, disabling macros, reading tables and queries, exporting data, and exporting forms and modules.
+# It is informational. A failed probe is a finding, so the job does not fail on one. See spikes/spike1-access-runtime/README.md.
+#
+# The install accepts the Microsoft 365 Access Runtime licence terms (AcceptEULA).
+
+on:
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "spikes/spike1-access-runtime/**"
+      - ".github/workflows/spike1-access-runtime.yml"
+  workflow_dispatch: {}
+
+concurrency:
+  group: spike1-access-runtime-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    name: access runtime probes
+    runs-on: windows-2022 # the same Windows Server release as the ltsc2022 container image
+    timeout-minutes: 40
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install the Microsoft 365 Access Runtime
+        timeout-minutes: 25
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dir = Join-Path $env:RUNNER_TEMP 'odt'
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          # The Office Deployment Tool's setup.exe, from Microsoft's CDN.
+          Invoke-WebRequest -Uri 'https://officecdn.microsoft.com/pr/wsus/setup.exe' -OutFile "$dir\setup.exe"
+          @'
+          <Configuration>
+            <Add OfficeClientEdition="64" Channel="Current">
+              <Product ID="AccessRuntimeRetail">
+                <Language ID="en-us" />
+              </Product>
+            </Add>
+            <Display Level="None" AcceptEULA="TRUE" />
+            <Updates Enabled="FALSE" />
+          </Configuration>
+          '@ | Set-Content -Encoding ASCII "$dir\config.xml"
+          $sw = [Diagnostics.Stopwatch]::StartNew()
+          Start-Process -FilePath "$dir\setup.exe" -ArgumentList "/configure `"$dir\config.xml`"" -Wait -NoNewWindow
+          Write-Host "install took $($sw.Elapsed)"
+          Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Office\ClickToRun\Configuration' | Select-Object ProductReleaseIds, VersionToReport | Format-List
+
+      # The first run could not start Access (0x80080005). Set the per-user values that suppress the first-run dialogs, and create
+      # the profile folders that Office automation expects, before the probes.
+      - name: Prepare for Office automation
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          foreach ($d in 'C:\Windows\System32\config\systemprofile\Desktop', 'C:\Windows\SysWOW64\config\systemprofile\Desktop') {
+            New-Item -ItemType Directory -Force -Path $d | Out-Null
+          }
+          $office = 'HKCU:\Software\Microsoft\Office\16.0'
+          foreach ($k in "$office\Common\General", "$office\Registration", "$office\FirstRun") { New-Item -Path $k -Force | Out-Null }
+          Set-ItemProperty "$office\Common\General" -Name ShownFirstRunOptin -Value 1 -Type DWord
+          Set-ItemProperty "$office\Registration" -Name AcceptAllEulas -Value 1 -Type DWord
+          Set-ItemProperty "$office\FirstRun" -Name BootedRTM -Value 1 -Type DWord
+          Set-ItemProperty "$office\FirstRun" -Name disablemovie -Value 1 -Type DWord
+
+      - name: Run the probes
+        timeout-minutes: 10
+        shell: powershell
+        run: .\spikes\spike1-access-runtime\probe.ps1
+
+      - name: Upload the results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: spike1-results
+          path: ${{ runner.temp }}/spike1/
+          retention-days: 30
