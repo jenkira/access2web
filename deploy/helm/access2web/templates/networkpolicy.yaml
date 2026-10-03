@@ -1,23 +1,85 @@
+# Each component accepts traffic only from the one that calls it, and calls only the one it needs, and DNS.
+# The browser reaches the frontend. The frontend calls the backend. The backend calls PostgreSQL.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: {{ .Release.Name }}
+  name: {{ .Release.Name }}-frontend
+  labels:
+    {{- include "a2w.labels" . | nindent 4 }}
 spec:
   podSelector:
-    matchLabels: { app.kubernetes.io/name: access2web }
+    matchLabels:
+      {{- include "a2w.selector" (dict "root" . "component" "frontend") | nindent 6 }}
   policyTypes: [Ingress, Egress]
   ingress:
     - from:
         - namespaceSelector:
-            matchLabels: {{- toYaml .Values.ingressFromNamespaceLabels | nindent 14 }}
-      ports: [{ port: 8000 }]
+            matchLabels:
+              {{- toYaml .Values.ingressFromNamespaceLabels | nindent 14 }}
+      ports: [{ port: 8080 }]
   egress:
     - to:
         - podSelector:
-            matchLabels: {{- toYaml .Values.database.podLabels | nindent 14 }}
-      ports: [{ port: {{ .Values.database.port }} }]
+            matchLabels:
+              {{- include "a2w.selector" (dict "root" . "component" "backend") | nindent 14 }}
+      ports: [{ port: 8000 }]
     - to:
         - namespaceSelector: {}
           podSelector:
             matchLabels: { k8s-app: kube-dns }
       ports: [{ port: 53, protocol: UDP }, { port: 53, protocol: TCP }]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-backend
+  labels:
+    {{- include "a2w.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "a2w.selector" (dict "root" . "component" "backend") | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "a2w.selector" (dict "root" . "component" "frontend") | nindent 14 }}
+      ports: [{ port: 8000 }]
+  egress:
+    {{- if .Values.postgresql.enabled }}
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "a2w.selector" (dict "root" . "component" "postgresql") | nindent 14 }}
+      ports: [{ port: 5432 }]
+    {{- end }}
+    {{- with .Values.externalDatabase.egress }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels: { k8s-app: kube-dns }
+      ports: [{ port: 53, protocol: UDP }, { port: 53, protocol: TCP }]
+{{- if .Values.postgresql.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-postgresql
+  labels:
+    {{- include "a2w.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "a2w.selector" (dict "root" . "component" "postgresql") | nindent 6 }}
+  # Nothing may start a connection from PostgreSQL, and only the backend may connect to it.
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "a2w.selector" (dict "root" . "component" "backend") | nindent 14 }}
+      ports: [{ port: 5432 }]
+{{- end }}

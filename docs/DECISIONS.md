@@ -46,6 +46,7 @@ Table 1 lists each decision, its status, and its source.
 | D24 | A new version of a published application waits up to 5 seconds for requests in flight. If the application is still busy, the publish stops with 409 and changes nothing. | Accepted | Decided by the owner on 3 October 2026. Implemented in `publish.republish`. |
 | D25 | The draft lock is a lease of 30 minutes from the last save, and each save extends it. A person with manage application can discard a draft at any time. | Accepted | Decided by the owner on 3 October 2026. Implemented in `drafts.py`. |
 | D26 | Saving through a form needs edit data on the form and on the table that the form saves to | Accepted | Decided by the owner on 3 October 2026. A form-only grant no longer lets a person save, and a table can be made read-only for someone who has edit data on the application. Implemented in `runtime.save_form`. |
+| D27 | The product ships as two images: a Python backend, and a generic nginx frontend that serves the built web files and proxies `/api/`. The Helm chart installs one PostgreSQL 16 instance, with its credentials in `values.yaml`. | Accepted | Decided by the owner on 3 October 2026. This is interim: the password is a development value, and the instance has no replica and no backup. Production uses the operator chosen under O8 (D17), and a secret. The single image and the old chart were deleted, because nothing was deployed. |
 
 ## Open items
 

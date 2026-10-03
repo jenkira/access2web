@@ -1,10 +1,9 @@
 name: Build and Push to GHCR
 
-# Builds the image from the Dockerfile at the repository root, checks that it starts the way the Helm chart runs it, and
-# scans it for vulnerabilities. The image is pushed to GHCR only on pushes to main and on version tags, never for a pull
-# request.
+# Builds the backend image and the frontend image, runs them together as the Helm chart runs them, and scans both for
+# vulnerabilities. The images are pushed to GHCR only on pushes to main and on version tags, never for a pull request.
 #
-# The image is built once into the local Docker daemon, tested and scanned there, and only then built again for the push.
+# Each image is built once into the local Docker daemon, tested and scanned there, and only then built again for the push.
 # The second build reuses the cache from the first, so it only adds the push.
 
 on:
@@ -23,13 +22,14 @@ concurrency:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE: ghcr.io/${{ github.repository }}
+  BACKEND_IMAGE: ghcr.io/${{ github.repository }}-backend
+  FRONTEND_IMAGE: ghcr.io/${{ github.repository }}-frontend
 
 jobs:
   build:
     name: build, test, scan, push
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     permissions:
       contents: read
       packages: write
@@ -47,72 +47,144 @@ jobs:
         id: version
         run: echo "version=$(cat VERSION)" >> "$GITHUB_OUTPUT"
 
-      - name: Build the image into the local daemon
+      - name: Build the backend image into the local daemon
         uses: docker/build-push-action@v7
         with:
-          context: .
+          context: ./backend
           push: false
           load: true
-          tags: access2web:ci
-          cache-from: type=gha,scope=access2web
-          cache-to: type=gha,mode=max,scope=access2web
+          tags: access2web-backend:ci
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,mode=max,scope=backend
 
-      # Run the image as the Helm chart does: a non-root user, a read-only root file system, no capabilities, and no
-      # privilege escalation. A missing file, a write to the image's file system, or a wrong user shows up here, not in the
-      # cluster.
-      - name: Smoke test the image under the chart's security settings
+      - name: Build the frontend image into the local daemon
+        uses: docker/build-push-action@v7
+        with:
+          context: ./web
+          push: false
+          load: true
+          tags: access2web-frontend:ci
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,mode=max,scope=frontend
+
+      # Each image must run as the user that the Helm chart expects.
+      - name: Check the users the images run as
         run: |
           set -euo pipefail
-          user="$(docker run --rm --entrypoint id access2web:ci -u)"
-          if [ "$user" != "10001" ]; then echo "::error::the image runs as uid $user, and the chart expects 10001"; exit 1; fi
-          docker run -d --name a2w -p 8000:8000 \
-            --read-only --cap-drop ALL --security-opt no-new-privileges \
-            access2web:ci
-          up=""
-          for _ in $(seq 1 30); do
-            if curl -fsS http://localhost:8000/healthz >/dev/null 2>&1; then up=yes; break; fi
+          backend="$(docker run --rm --entrypoint id access2web-backend:ci -u)"
+          frontend="$(docker run --rm --entrypoint id access2web-frontend:ci -u)"
+          if [ "$backend" != "10001" ]; then echo "::error::the backend image runs as uid $backend, and the chart expects 10001"; exit 1; fi
+          if [ "$frontend" != "101" ]; then echo "::error::the frontend image runs as uid $frontend, and the chart expects 101"; exit 1; fi
+
+      # Run PostgreSQL, the backend, and the frontend together, each with the security settings that the Helm chart gives it:
+      # a read-only root file system, no capabilities, no privilege escalation, and a non-root user. The writable folders are the
+      # same ones the chart mounts. A missing file, a write to a read-only folder, or a wrong user shows up here, not in the cluster.
+      - name: Start the stack
+        run: |
+          set -euo pipefail
+          docker network create a2w
+          hardening="--read-only --cap-drop ALL --security-opt no-new-privileges"
+          url="postgresql://access2web:ci-password@db:5432/access2web"
+
+          # shellcheck disable=SC2086
+          docker run -d --name db --network a2w --user 999:999 $hardening \
+            --tmpfs /var/lib/postgresql/data:rw,uid=999,gid=999,mode=700 \
+            --tmpfs /var/run/postgresql:rw,uid=999,gid=999 --tmpfs /tmp:rw,uid=999,gid=999 \
+            -e POSTGRES_USER=access2web -e POSTGRES_PASSWORD=ci-password -e POSTGRES_DB=access2web \
+            -e PGDATA=/var/lib/postgresql/data/pgdata postgres:16
+          for _ in $(seq 1 60); do
+            if docker exec db pg_isready -U access2web -d access2web >/dev/null 2>&1; then break; fi
             sleep 1
           done
-          if [ -z "$up" ]; then docker logs a2w; echo "::error::the container did not become healthy"; exit 1; fi
-          # The built web front end is served, and an unauthenticated API call is refused, not a server error.
-          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8000/)" = "200"
-          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8000/api/apps/none)" = "401"
+          docker exec db pg_isready -U access2web -d access2web
 
-      - name: Show the container log if the smoke test failed
+          # The same command as the chart's init container: it creates the control schema and the citext extension.
+          # shellcheck disable=SC2086
+          docker run --rm --network a2w $hardening -e A2W_DATABASE_URL="$url" \
+            access2web-backend:ci python -c "from a2w import db; db.bootstrap()"
+
+          # The development sign-in is on here, only so that the next step can publish an application through the proxy.
+          # shellcheck disable=SC2086
+          docker run -d --name backend --network a2w $hardening -e A2W_DATABASE_URL="$url" -e A2W_DEV_AUTH=1 access2web-backend:ci
+          # shellcheck disable=SC2086
+          docker run -d --name frontend --network a2w -p 8080:8080 $hardening \
+            --tmpfs /tmp:rw,uid=101,gid=101 --tmpfs /etc/nginx/conf.d:rw,uid=101,gid=101 \
+            -e BACKEND_URL=http://backend:8000 access2web-frontend:ci
+
+          for _ in $(seq 1 60); do
+            if curl -fsS http://localhost:8080/healthz >/dev/null 2>&1; then break; fi
+            sleep 1
+          done
+          curl -fsS http://localhost:8080/healthz
+
+      - name: Check the stack through the frontend
+        run: STACK_DEV_AUTH=1 python3 .github/scripts/stack_smoke.py http://localhost:8080
+
+      - name: Show the container logs if a step failed
         if: failure()
-        run: docker logs a2w || true
+        run: |
+          for c in db backend frontend; do echo "=== $c"; docker logs "$c" 2>&1 | tail -40 || true; done
 
       # Report every fixable high or critical finding in the log and in the artifact, without failing the run.
-      - name: Scan the image (report)
+      - name: Scan the backend image (report)
         uses: aquasecurity/trivy-action@v0.36.0
         with:
-          image-ref: access2web:ci
+          image-ref: access2web-backend:ci
           scanners: vuln
           format: sarif
-          output: trivy-image.sarif
+          output: trivy-backend.sarif
           severity: CRITICAL,HIGH
           ignore-unfixed: true
 
-      - name: Upload the scan to code scanning (best effort)
+      - name: Scan the frontend image (report)
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: access2web-frontend:ci
+          scanners: vuln
+          format: sarif
+          output: trivy-frontend.sarif
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+
+      - name: Upload the backend scan to code scanning (best effort)
         if: always()
         continue-on-error: true
         uses: github/codeql-action/upload-sarif@v4
         with:
-          sarif_file: trivy-image.sarif
+          sarif_file: trivy-backend.sarif
+          category: trivy-backend-image
 
-      - name: Upload the scan as an artifact
+      - name: Upload the frontend scan to code scanning (best effort)
+        if: always()
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy-frontend.sarif
+          category: trivy-frontend-image
+
+      - name: Upload the scans as an artifact
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: trivy-image-results
-          path: trivy-image.sarif
+          path: trivy-*.sarif
           retention-days: 30
 
       # Fail the run on a critical finding that has a fix. High findings are reported above and do not fail the run.
-      - name: Scan the image (gate on fixable critical findings)
+      - name: Scan the backend image (gate on fixable critical findings)
         uses: aquasecurity/trivy-action@v0.36.0
         with:
-          image-ref: access2web:ci
+          image-ref: access2web-backend:ci
+          scanners: vuln
+          format: table
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+
+      - name: Scan the frontend image (gate on fixable critical findings)
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: access2web-frontend:ci
           scanners: vuln
           format: table
           severity: CRITICAL
@@ -127,12 +199,12 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata
+      - name: Extract backend metadata
         if: github.event_name != 'pull_request'
-        id: meta
+        id: meta-backend
         uses: docker/metadata-action@v6
         with:
-          images: ${{ env.IMAGE }}
+          images: ${{ env.BACKEND_IMAGE }}
           tags: |
             type=ref,event=branch
             type=semver,pattern={{version}}
@@ -142,12 +214,37 @@ jobs:
           labels: |
             org.opencontainers.image.version=${{ steps.version.outputs.version }}
 
-      - name: Push
+      - name: Extract frontend metadata
+        if: github.event_name != 'pull_request'
+        id: meta-frontend
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.FRONTEND_IMAGE }}
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix=sha-,format=short
+            type=raw,value=${{ steps.version.outputs.version }}
+          labels: |
+            org.opencontainers.image.version=${{ steps.version.outputs.version }}
+
+      - name: Push the backend image
         if: github.event_name != 'pull_request'
         uses: docker/build-push-action@v7
         with:
-          context: .
+          context: ./backend
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=access2web
+          tags: ${{ steps.meta-backend.outputs.tags }}
+          labels: ${{ steps.meta-backend.outputs.labels }}
+          cache-from: type=gha,scope=backend
+
+      - name: Push the frontend image
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@v7
+        with:
+          context: ./web
+          push: true
+          tags: ${{ steps.meta-frontend.outputs.tags }}
+          labels: ${{ steps.meta-frontend.outputs.labels }}
+          cache-from: type=gha,scope=frontend

@@ -51,23 +51,25 @@ jobs:
           chart="$(sed -n 's/^version: *//p' "$CHART/Chart.yaml" | tr -d '"')"
           app="$(sed -n 's/^appVersion: *//p' "$CHART/Chart.yaml" | tr -d '"')"
           py="$(sed -n 's/^version = "\(.*\)"/\1/p' backend/pyproject.toml)"
-          tag="$(sed -n 's/^ *tag: *//p' "$CHART/values.yaml" | tr -d '"')"
-          echo "VERSION=$version chart=$chart appVersion=$app pyproject=$py image tag=$tag"
-          for pair in "chart:$chart" "appVersion:$app" "pyproject:$py" "image tag:$tag"; do
+          backend="$(python3 -c "import yaml; print(yaml.safe_load(open('$CHART/values.yaml'))['backend']['image']['tag'])")"
+          frontend="$(python3 -c "import yaml; print(yaml.safe_load(open('$CHART/values.yaml'))['frontend']['image']['tag'])")"
+          echo "VERSION=$version chart=$chart appVersion=$app pyproject=$py backend tag=$backend frontend tag=$frontend"
+          for pair in "chart:$chart" "appVersion:$app" "pyproject:$py" "backend image tag:$backend" "frontend image tag:$frontend"; do
             if [ "${pair#*:}" != "$version" ]; then
               echo "::error::${pair%%:*} is ${pair#*:}, and VERSION is $version"; exit 1
             fi
           done
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
-      # The chart has two switches that change what it renders: devAuth and the ingress. Render each way.
+      # The chart has switches that change what it renders: backend.devAuth, the ingress, and the bundled PostgreSQL. Render each way.
       - name: Render the chart
         run: |
           set -euo pipefail
           mkdir -p /tmp/rendered
           helm template access2web "$CHART" > /tmp/rendered/default.yaml
-          helm template access2web "$CHART" --set devAuth=true > /tmp/rendered/dev-auth.yaml
+          helm template access2web "$CHART" --set backend.devAuth=true > /tmp/rendered/dev-auth.yaml
           helm template access2web "$CHART" --set ingress.enabled=true > /tmp/rendered/ingress.yaml
+          helm template access2web "$CHART" --set postgresql.enabled=false > /tmp/rendered/external-database.yaml
           helm template access2web "$CHART" --set ingress.enabled=true --set ingress.className=nginx \
             --set ingress.tlsSecret=access2web-tls > /tmp/rendered/ingress-tls.yaml
 
@@ -75,10 +77,17 @@ jobs:
       - name: Check that development sign-in is off by default
         run: |
           set -euo pipefail
-          if grep -q A2W_DEV_AUTH /tmp/rendered/default.yaml /tmp/rendered/ingress.yaml /tmp/rendered/ingress-tls.yaml; then
+          if grep -q A2W_DEV_AUTH /tmp/rendered/default.yaml /tmp/rendered/ingress.yaml /tmp/rendered/ingress-tls.yaml /tmp/rendered/external-database.yaml; then
             echo "::error::A2W_DEV_AUTH is set in a render that did not ask for devAuth"; exit 1
           fi
           grep -q A2W_DEV_AUTH /tmp/rendered/dev-auth.yaml
+
+      # The chart bakes in a development database password for now. Say so on every run until it is replaced.
+      - name: Warn about the baked-in database password
+        run: |
+          if grep -q access2web-dev-password /tmp/rendered/default.yaml; then
+            echo "::warning::the default render contains the development database password from values.yaml"
+          fi
 
       - name: Check the rendered manifests against the Kubernetes schemas
         run: |

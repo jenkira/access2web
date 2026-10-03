@@ -38,7 +38,8 @@ Not built yet: queries (Spike 2), forms and reports (Phase 2), object-level and 
 | `spec/expression/` | Conformance cases that the Python and TypeScript expression evaluators must both pass. The language is described in [docs/EXPRESSIONS.md](docs/EXPRESSIONS.md). |
 | `spikes/` | Prototype code for the spikes. Not product code. Reports are in `docs/spikes/`. |
 | `deploy/helm/access2web/` | Helm chart |
-| `Dockerfile` | Image that serves the API and the built front end |
+| `backend/Dockerfile` | Backend image: the API on port 8000 |
+| `web/Dockerfile` | Frontend image: nginx serves the built web files on port 8080 and proxies `/api/` to the backend |
 
 ## Run the tests
 
@@ -192,8 +193,8 @@ GitHub Actions runs the checks in Table 5 on every pull request. The workflows a
 | Backend Tests | The backend's pytest suite against PostgreSQL 16, including the differential test of the Python and TypeScript evaluators. CI makes a missing Node a failure and not a skip. | Pull request |
 | Frontend Tests | Type-check and build of `web/`. The form editor's tests, in Chrome, against the prototype server and against the real backend with PostgreSQL. | Pull request |
 | Spike Tests | The Spike 2 transpiler tests and the Spike 3 sandbox tests. | Pull request |
-| Build and Push to GHCR | Builds the image, starts it as the Helm chart runs it (non-root, read-only file system, no capabilities), checks `/healthz`, the web front end, and a 401 for an unauthenticated call, and scans it with Trivy. It fails on a fixable critical finding. It pushes to GHCR on pushes to `main` and on `v*` tags. | Pull request, push to `main`, tag |
-| Verify Helm Chart | Lints the chart, renders it four ways, checks that development sign-in is off by default, validates the manifests with kubeconform, checks that `VERSION`, the chart, the image tag, and `pyproject.toml` agree, and packages the chart. | Pull request and push, for chart changes |
+| Build and Push to GHCR | Builds the backend and frontend images, starts them with PostgreSQL as the Helm chart runs them (non-root, read-only file system, no capabilities), publishes an application through the frontend, and scans both images with Trivy. It fails on a fixable critical finding. It pushes `access2web-backend` and `access2web-frontend` to GHCR on pushes to `main` and on `v*` tags. | Pull request, push to `main`, tag |
+| Verify Helm Chart | Lints the chart, renders it five ways, checks that development sign-in is off by default, validates the manifests with kubeconform, checks that `VERSION`, the chart, the two image tags, and `pyproject.toml` agree, and packages the chart. | Pull request and push, for chart changes |
 | Security Scan | `pip-audit` and `npm audit` (fail on a high finding), Trivy for the files and configuration, and gitleaks for secrets. | Pull request, and Mondays |
 | Semgrep | Security rules for Python, FastAPI, JavaScript, and TypeScript, at a pinned rules commit. It reports and does not fail yet. | Pull request, and Mondays |
 | SBOM | CycloneDX bills of materials for the backend, the web front end, and the editor, attached to a release on a tag. | Pull request and tag |
@@ -201,9 +202,9 @@ GitHub Actions runs the checks in Table 5 on every pull request. The workflows a
 
 Every job has a timeout (5 to 30 minutes), so a step that hangs fails the run and does not hold the checks open.
 
-Dependabot opens weekly update pull requests for the Python and npm dependencies, the Dockerfile, and the workflows.
+Dependabot opens weekly update pull requests for the Python and npm dependencies, the Dockerfiles, and the workflows.
 
-`VERSION` holds the one version number. Change it, `backend/pyproject.toml`, `Chart.yaml`, and the image tag in `values.yaml` together, and the Helm workflow fails if they differ.
+`VERSION` holds the one version number. Change it, `backend/pyproject.toml`, `Chart.yaml`, and both image tags in `values.yaml` together, and the Helm workflow fails if they differ.
 
 To require these checks before a merge, add their names to the branch protection rule for `main`. The workflows that run only for some paths (Verify Helm Chart) are not suitable as required checks. Uploads to code scanning are best effort, because a private repository needs GitHub Code Security for them.
 
@@ -231,7 +232,9 @@ Table 6 lists the environment variables.
 ## Known limits
 
 - The API stores the extracted metadata, including rows, in the control database. Large databases need object storage, which is not built yet.
-- The container image and the Helm chart were written but not built or linted, because the build environment had no Docker daemon and no Helm.
+- The Dockerfiles were written without a Docker daemon, so the first build and the container run happen in CI. The Helm chart was linted and validated with kubeconform, but not installed in a cluster.
+- The chart installs one PostgreSQL instance with the password in `values.yaml` (`access2web-dev-password`). The instance has no replica and no backup. Set `postgresql.auth.password`, or turn the bundled database off with `postgresql.enabled=false` and use `externalDatabase`. This is interim (D27).
+- The runtime uses one shared database login for all applications. Per-application logins are planned for Phase 3 (D23).
 - A table without a single-column primary key can be listed and created in, but not edited or deleted from.
 - A table that has a form can be created in and updated only through the form, so edit data on the table alone no longer lets a person write. A save through the form needs edit data on the form and on the table. Deleting is not affected. Editing a form after publish is not built.
 - A new version carries renames and form changes only. Adding or removing a field, an entity, or a relationship needs a design that handles existing data, and is not built.

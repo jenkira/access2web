@@ -1,21 +1,52 @@
-image:
-  repository: proget.example.internal/access2web/api
-  tag: "0.1.0"
-replicas: 2
-# Name of a Kubernetes Secret with the key `url`. The External Secrets Operator syncs it from Passwordstate.
-databaseSecret: access2web-database
-# Never set devAuth to true outside a development cluster.
-devAuth: false
+backend:
+  image:
+    repository: ghcr.io/jenkira/access2web-backend
+    tag: "0.1.0"
+  replicas: 2
+  # Never set devAuth to true outside a development cluster. It trusts identity headers that the client sends.
+  devAuth: false
+  resources:
+    requests: { cpu: 250m, memory: 256Mi }
+    limits: { memory: 512Mi }
+
+frontend:
+  image:
+    repository: ghcr.io/jenkira/access2web-frontend
+    tag: "0.1.0"
+  replicas: 2
+  resources:
+    requests: { cpu: 50m, memory: 32Mi }
+    limits: { memory: 64Mi }
+
+# A single PostgreSQL instance that the chart installs, for development and for the interim. It has no replica and no backup.
+# The password below is only for development. Set your own, or turn this off and use externalDatabase.
+postgresql:
+  enabled: true
+  image:
+    repository: postgres
+    tag: "16"
+  auth:
+    database: access2web
+    username: access2web
+    password: access2web-dev-password
+  persistence:
+    size: 8Gi
+    storageClass: ""
+  resources:
+    requests: { cpu: 250m, memory: 256Mi }
+    limits: { memory: 1Gi }
+
+# Used when postgresql.enabled is false. The name of a Secret with the key `url`, which holds the database URL. The External
+# Secrets Operator syncs it from Passwordstate. `egress` is a list of NetworkPolicy egress rules that let the backend reach the database.
+externalDatabase:
+  existingSecret: access2web-database
+  egress: []
+
 ingress:
   enabled: false
   className: ""
   host: access2web.example.internal
   tlsSecret: ""
-resources:
-  requests: { cpu: 250m, memory: 256Mi }
-  limits: { memory: 512Mi }
-# Labels that the network policy allows traffic from, and the database pods it can reach.
+
+# Labels of the namespace that the ingress controller runs in. The network policy lets the frontend accept traffic from it.
 ingressFromNamespaceLabels: { kubernetes.io/metadata.name: ingress }
-database:
-  podLabels: { app.kubernetes.io/name: postgresql }
-  port: 5432
