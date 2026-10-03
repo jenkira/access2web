@@ -1,5 +1,5 @@
 # The Access2Web web front end, served by nginx. Build with the web directory as the context: docker build -t access2web-frontend web
-FROM node:22-slim AS build
+FROM node:26-slim AS build
 WORKDIR /web
 COPY package.json package-lock.json ./
 RUN npm ci --no-audit --no-fund
