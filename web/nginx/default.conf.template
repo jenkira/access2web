@@ -1,5 +1,15 @@
-# Served by the nginx image. The entrypoint replaces ${BACKEND_URL} when the container starts, and leaves nginx's own
-# variables, such as $host and $uri, alone.
+# Served by the nginx image. The entrypoint replaces ${BACKEND_URL} and the A2W_DEV_* values when the container starts, and
+# leaves nginx's own variables, such as $host and $uri, alone.
+
+# Development only. When A2W_DEV_USER is set, every request to the API is made as that person, with the roles and groups given
+# in A2W_DEV_ROLES and A2W_DEV_GROUPS, and whatever the client sent is ignored. That lets a browser use the backend's
+# development sign-in (A2W_DEV_AUTH=1), which a browser cannot do alone because it cannot add request headers. When A2W_DEV_USER
+# is empty, which is the default, the client's own headers pass through unchanged. The backend ignores all of them unless
+# A2W_DEV_AUTH=1. Do not set these for a deployment that other people can reach.
+map "${A2W_DEV_USER}" $a2w_user   { ""  $http_x_a2w_user;   default "${A2W_DEV_USER}"; }
+map "${A2W_DEV_USER}" $a2w_roles  { ""  $http_x_a2w_roles;  default "${A2W_DEV_ROLES}"; }
+map "${A2W_DEV_USER}" $a2w_groups { ""  $http_x_a2w_groups; default "${A2W_DEV_GROUPS}"; }
+
 server {
     listen 8080;
     server_name _;
@@ -27,6 +37,9 @@ server {
         proxy_set_header Host $host;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-A2W-User $a2w_user;
+        proxy_set_header X-A2W-Roles $a2w_roles;
+        proxy_set_header X-A2W-Groups $a2w_groups;
         proxy_read_timeout 60s;
         client_max_body_size 64m;
     }

@@ -41,6 +41,21 @@ jobs:
       - name: Check the stack through the frontend
         run: STACK_DEV_AUTH=1 python3 .github/scripts/stack_smoke.py http://localhost:8080
 
+      # A browser cannot add the identity headers, so the frontend can add them for it. Check that the setting is honoured and that
+      # the client cannot override it: a person with no role stays without it, even if the request claims a role.
+      - name: Check the development identity for a browser
+        run: |
+          set -euo pipefail
+          status() { curl -s -o /dev/null -w '%{http_code}' "$@"; }
+          expect() { if [ "$2" != "$3" ]; then echo "::error::$1: expected $3, got $2"; exit 1; fi; echo "ok   $1"; }
+          expect "no identity is refused" "$(status http://localhost:8080/api/audit)" 401
+          A2W_DEV_AUTH=1 A2W_DEV_USER=olive docker compose up -d --wait frontend
+          expect "a configured person without a role is refused, whatever the client claims" \
+            "$(status -H 'x-a2w-roles: auditor' http://localhost:8080/api/audit)" 403
+          A2W_DEV_AUTH=1 A2W_DEV_USER=olive A2W_DEV_ROLES=auditor docker compose up -d --wait frontend
+          expect "a configured person with a role is allowed, with no headers from the client" \
+            "$(status http://localhost:8080/api/audit)" 200
+
       - name: Start the PostgreSQL for the backend tests
         run: docker compose --profile test up -d --wait test-db
 
