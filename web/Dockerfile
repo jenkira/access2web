@@ -12,4 +12,5 @@ FROM nginxinc/nginx-unprivileged:1.27-alpine
 COPY nginx/default.conf.template /etc/nginx/templates/default.conf.template
 COPY --from=build /web/dist /usr/share/nginx/html
 ENV BACKEND_URL=http://backend:8000
+USER 101
 EXPOSE 8080

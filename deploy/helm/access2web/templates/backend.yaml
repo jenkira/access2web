@@ -40,6 +40,8 @@ spec:
             - name: A2W_DATABASE_URL
               valueFrom:
                 secretKeyRef: { name: {{ include "a2w.databaseSecret" . }}, key: url }
+          resources:
+            {{- toYaml .Values.backend.resources | nindent 12 }}
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
