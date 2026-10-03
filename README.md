@@ -49,7 +49,15 @@ Not built yet: queries (Spike 2), forms and reports (Phase 2), object-level and 
 A2W_DEV_AUTH=1 docker compose up --build
 ```
 
-Open <http://localhost:8080>. Without `A2W_DEV_AUTH=1` the development sign-in is off, and every API call returns 401. With it on, the backend trusts identity headers from the client, so use it only on a machine you trust. To check the stack end to end, run `STACK_DEV_AUTH=1 python3 .github/scripts/stack_smoke.py http://localhost:8080`. Stop it and delete the data with `docker compose down -v`.
+Open <http://localhost:8080>. Without `A2W_DEV_AUTH=1` the development sign-in is off, and every API call returns 401. With it on, the backend trusts identity headers from the client, so use it only on a machine you trust.
+
+A browser cannot add those headers, so the page shows "Sign in through the systems portal to continue." until the portal is chosen. To sign in a browser, name the person that the frontend acts as:
+
+```sh
+A2W_DEV_AUTH=1 A2W_DEV_USER=olive A2W_DEV_ROLES=platform_admin docker compose up --build
+```
+
+`A2W_DEV_USER` is the person, `A2W_DEV_ROLES` and `A2W_DEV_GROUPS` are comma-separated lists, and all three are optional. With `A2W_DEV_USER` set, every API request through port 8080 is made as that person, and anyone who can reach the port acts as them, so keep the port private. Whatever the client sends is ignored. With it empty, which is the default, the client's own headers pass through, and the stack test relies on that. To check the stack end to end, run `STACK_DEV_AUTH=1 python3 .github/scripts/stack_smoke.py http://localhost:8080`. Stop it and delete the data with `docker compose down -v`.
 
 ### In a GitHub Codespace
 

@@ -3,6 +3,8 @@
 #
 #   docker compose up --build                      start the stack, then open http://localhost:8080
 #   A2W_DEV_AUTH=1 docker compose up --build       the same, with the development sign-in on (see below)
+#   A2W_DEV_AUTH=1 A2W_DEV_USER=olive A2W_DEV_ROLES=platform_admin docker compose up --build
+#                                                  the same, and a browser is signed in as olive, an administrator
 #   docker compose --profile test up -d test-db    only a PostgreSQL for the backend tests (port 54329)
 #   docker compose down -v                         stop everything and delete the data
 #
@@ -67,6 +69,11 @@ services:
     <<: *hardening
     environment:
       BACKEND_URL: http://backend:8000
+      # Development only, and only if the backend has A2W_DEV_AUTH=1. When A2W_DEV_USER is set, every API request through this
+      # frontend is made as that person, so that a browser can sign in. Whatever the client sends is ignored.
+      A2W_DEV_USER: ${A2W_DEV_USER:-}
+      A2W_DEV_ROLES: ${A2W_DEV_ROLES:-}
+      A2W_DEV_GROUPS: ${A2W_DEV_GROUPS:-}
     ports:
       - "127.0.0.1:8080:8080"
     tmpfs:
