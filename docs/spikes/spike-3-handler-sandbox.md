@@ -237,7 +237,7 @@ The interface has no asynchronous calls, no `import`, no timers, and no way to r
 3. **Give each application its own database login**, with no role membership, and do not use `SET ROLE` between applications.
 4. **Keep the SQL guard**, set the user identity from the host, and review any row-level rule that reads a setting a handler's role can change.
 5. **Finish the two missing steps**: rerun with real procedures, and run in a pod with CPU and memory limits to confirm that the sandbox limits and the pod limits both hold.
-6. **Update the technical design** with the findings above. I have not changed it, because it records decisions that the owner makes.
+6. **Update the technical design** with the findings above. The owner approved this on 3 October 2026 (decision D23), and the design now records the per-application logins and the killable worker. The Phase 1 runtime still uses one shared login.
 
 ### Effort estimate
 

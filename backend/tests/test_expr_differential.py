@@ -1,9 +1,12 @@
 """Differential test: random expressions go through the Python evaluator and the TypeScript evaluator, and the results must agree.
 
 It checks four things for every case: whether the expression is valid, its value, the fields it refers to, and the result of a rename.
-The TypeScript evaluator lives with the form editor prototype for now. If that file is not there, the test is skipped.
+The TypeScript evaluator lives with the form editor prototype for now. If that file is not there, or Node is not installed,
+the test is skipped, unless A2W_REQUIRE_DIFFERENTIAL is set. CI sets it, so that a missing Node fails the run and the
+check cannot be skipped without anyone noticing.
 """
 import json
+import os
 import random
 import shutil
 import subprocess
@@ -110,7 +113,8 @@ def python_result(c: dict) -> dict:
         return {"error": True}
 
 
-@pytest.mark.skipif(shutil.which("node") is None or not TOOL.exists(), reason="node or the TypeScript evaluator is not available")
+@pytest.mark.skipif((shutil.which("node") is None or not TOOL.exists()) and not os.environ.get("A2W_REQUIRE_DIFFERENTIAL"),
+                    reason="node or the TypeScript evaluator is not available")
 @pytest.mark.parametrize("seed", [1, 2, 3, 4])
 def test_python_and_typescript_agree(seed):
     cases = make_cases(2500, seed)

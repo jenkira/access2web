@@ -1,0 +1,104 @@
+name: Spike Tests
+
+# Runs the unit tests of the spike prototypes that other work builds on: the Jet SQL transpiler (Spike 2) and the handler
+# sandbox (Spike 3). These are prototypes, not product code, so they are separate from the backend and frontend checks.
+#
+# The trigger is the pull request only. See backend-tests.yml for the reason.
+
+on:
+  pull_request:
+    branches: ["main"]
+  workflow_dispatch:
+
+concurrency:
+  group: spike-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read # dorny/paths-filter needs this to list the changed files
+    outputs:
+      transpiler: ${{ steps.filter.outputs.transpiler }}
+      sandbox: ${{ steps.filter.outputs.sandbox }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: filter
+        uses: dorny/paths-filter@v4
+        with:
+          filters: |
+            transpiler:
+              - 'spikes/spike2-query-translation/**'
+              - '.github/workflows/spike-tests.yml'
+            sandbox:
+              - 'spikes/spike3-sandbox/**'
+              - '.github/workflows/spike-tests.yml'
+
+  transpiler:
+    name: Spike 2 transpiler (unit tests)
+    needs: changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        if: needs.changes.outputs.transpiler == 'true'
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Run tests
+        if: needs.changes.outputs.transpiler == 'true'
+        working-directory: spikes/spike2-query-translation
+        run: |
+          pip install pytest
+          python -m pytest tests -q
+
+  sandbox:
+    name: Spike 3 sandbox (tests)
+    needs: changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Node
+        if: needs.changes.outputs.sandbox == 'true'
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: spikes/spike3-sandbox/package-lock.json
+
+      - name: Install dependencies
+        if: needs.changes.outputs.sandbox == 'true'
+        working-directory: spikes/spike3-sandbox
+        run: npm ci
+
+      - name: Run tests
+        if: needs.changes.outputs.sandbox == 'true'
+        working-directory: spikes/spike3-sandbox
+        env:
+          A2W_SPIKE_ADMIN_URL: postgresql://postgres:test@127.0.0.1:5432/postgres
+        run: npm test

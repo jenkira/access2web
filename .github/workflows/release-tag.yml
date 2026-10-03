@@ -1,0 +1,41 @@
+name: Tag release on VERSION change
+
+# Pushes the v* tag when the VERSION file changes on main. The tag is what the image workflow's semver tags and the SBOM
+# release attachment use.
+#
+# A tag pushed with the workflow's own token does not start other workflows. The image workflow also tags every push to
+# main with the contents of VERSION, so the release image exists either way. The SBOM is attached to a release only for a
+# tag that a person pushes, or after running the SBOM workflow by hand on the tag.
+
+on:
+  push:
+    branches: ["main"]
+    paths: ["VERSION"]
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Read application version
+        id: version
+        run: echo "tag=v$(cat VERSION)" >> "$GITHUB_OUTPUT"
+
+      - name: Create and push the tag if it does not exist
+        run: |
+          TAG="${{ steps.version.outputs.tag }}"
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG already exists, skipping."
+            exit 0
+          fi
+          git tag "$TAG"
+          git push origin "$TAG"

@@ -1,6 +1,10 @@
 """Control database: platform metadata, grants, and the append-only audit log."""
 
 BOOTSTRAP = r"""
+-- Text columns are citext, because Access ignores case in text (decision D22). citext is a trusted extension, so the
+-- database owner can create it. The PostgreSQL operator must allow it.
+create extension if not exists citext;
+
 create schema if not exists a2w_control;
 revoke all on schema a2w_control from public;
 

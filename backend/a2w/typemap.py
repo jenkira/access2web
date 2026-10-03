@@ -7,10 +7,12 @@ class Mapped:
     pg_type: str | None  # None means the field is not migrated
     identity: bool = False
     note: str | None = None  # reason when the field is only partly converted
+    max_length: int | None = None  # the field size from Access, kept as a check because citext has no length
 
 
 _SIMPLE = {
-    "long text": "text", "memo": "text", "hyperlink": "text",
+    # Access ignores case when it compares, groups, sorts, and removes duplicates from text, so text is citext (decision D22).
+    "long text": "citext", "memo": "citext", "hyperlink": "citext",
     "byte": "smallint", "integer": "smallint", "long integer": "integer",
     "single": "real", "double": "double precision",
     "currency": "numeric(19,4)", "date/time": "timestamp",
@@ -22,7 +24,7 @@ def map_type(access_type: str, size: int | None = None,
              precision: int | None = None, scale: int | None = None) -> Mapped:
     t = access_type.strip().lower()
     if t in ("short text", "text"):
-        return Mapped(f"varchar({int(size)})" if size else "varchar(255)")
+        return Mapped("citext", max_length=int(size) if size else 255)
     if t == "autonumber":
         return Mapped("integer", identity=True)
     if t in ("decimal", "numeric"):

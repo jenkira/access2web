@@ -1,0 +1,76 @@
+name: Semgrep
+
+# Static analysis of the Python backend and the TypeScript front end and editor, with Semgrep's open rules. The rules are
+# cloned from Semgrep's public rules repository at a pinned commit, not fetched from the semgrep.dev registry, so a change
+# upstream cannot alter what this workflow reports without a change here.
+#
+# Only the security rules are used, for the languages and frameworks this project uses: Python and FastAPI, JavaScript
+# and TypeScript, and the generic secrets rules. The broader language directories also hold style and correctness rules.
+#
+# This run reports findings and does not fail. Make it a gate after the first findings have been triaged.
+
+on:
+  pull_request:
+    branches: ["main"]
+  schedule:
+    - cron: "30 6 * * 1" # Mondays 06:30 UTC
+  workflow_dispatch:
+
+concurrency:
+  group: semgrep-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  security-events: write # best-effort SARIF upload only
+
+env:
+  SEMGREP_RULES_REF: 81634cfc9e68dc5f238a8062909a60ba34500648
+
+jobs:
+  semgrep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Checkout Semgrep rules (pinned)
+        uses: actions/checkout@v7
+        with:
+          repository: semgrep/semgrep-rules
+          ref: ${{ env.SEMGREP_RULES_REF }}
+          path: .semgrep-rules
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install Semgrep
+        run: pip install semgrep
+
+      - name: Run Semgrep
+        run: |
+          semgrep scan --metrics=off \
+            --config=.semgrep-rules/python/lang/security \
+            --config=.semgrep-rules/python/fastapi \
+            --config=.semgrep-rules/javascript/lang/security \
+            --config=.semgrep-rules/generic/secrets \
+            --sarif --output=semgrep-results.sarif \
+            backend/a2w web/src spikes/spike5-form-editor/src
+
+      - name: Upload SARIF to code scanning (best effort)
+        if: always()
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: semgrep-results.sarif
+
+      - name: Upload results as an artifact
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: semgrep-results
+          path: semgrep-results.sarif
+          retention-days: 30

@@ -25,6 +25,8 @@ def _column(f: FieldDef) -> sql.Composable:
         parts.append(sql.SQL("not null"))
     if f.default and not f.identity:
         parts += [sql.SQL("default"), _default_sql(f.default)]
+    if f.max_length is not None:  # citext has no length, so the size from Access is a check
+        parts.append(sql.SQL("check (char_length({}) <= {})").format(sql.Identifier(f.name), sql.Literal(int(f.max_length))))
     return sql.SQL(" ").join(parts)
 
 
