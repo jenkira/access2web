@@ -20,4 +20,6 @@ the results appear in the job summary and in the `spike1-results` artifact.
 What it does not test yet: reports, macros, a password-protected file, a linked table, a `.mdb` file, an `AutoExec` macro that must
 not run, and a real database. Add those when a real sample is available.
 
+Results so far are in [docs/spikes/spike-1-access-runtime.md](../../docs/spikes/spike-1-access-runtime.md).
+
 The workflow is informational. It does not fail when a probe fails, because a FAIL is a finding, not a defect.
