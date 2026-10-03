@@ -1,5 +1,9 @@
 # Probes what the Microsoft 365 Access Runtime allows when Access is driven through COM. Run it in Windows PowerShell 5.1.
 # Each probe is independent. A failure is recorded and the script goes on.
+#
+# The first runs showed that New-Object -ComObject Access.Application fails with 0x80080005 on a machine that has only the
+# Runtime, although MSACCESS.EXE starts fine when it is given a database. So when COM activation fails, this script starts
+# MSACCESS.EXE with the sample database and attaches to that running instance with GetActiveObject.
 param(
     [string]$Work = (Join-Path $env:RUNNER_TEMP 'spike1'),
     [string]$Fixtures = (Join-Path $PSScriptRoot 'fixtures')
@@ -8,8 +12,11 @@ $ErrorActionPreference = 'Stop'
 New-Item -ItemType Directory -Force -Path $Work | Out-Null
 $script:results = New-Object System.Collections.Generic.List[object]
 $script:access = $null
+$script:attached = $false
 $script:exe = $null
-$script:t0 = Get-Date
+
+# Watchdog: a modal dialog or a hung COM call would block the script forever. Killing Access makes a blocked call fail.
+$watchdog = Start-Job -ScriptBlock { Start-Sleep -Seconds 420; Get-Process MSACCESS -ErrorAction SilentlyContinue | Stop-Process -Force }
 
 function Probe([string]$Name, [scriptblock]$Body) {
     try {
@@ -50,14 +57,12 @@ Probe 'create a sample .accdb with ACE' {
     "$((Get-Item $db).Length) bytes"
 }
 
-function Start-AccessCom {
+Probe 'start Access.Application (COM activation)' {
     $script:access = New-Object -ComObject Access.Application
     "version $($script:access.Version), build $($script:access.Build)"
 }
 
-Probe 'start Access.Application' { Start-AccessCom }
-
-# If Access would not start, find out why, and try the usual remedies.
+# COM activation failed: find out where the executable is, then start it with a database and attach to it.
 if (-not $script:access) {
     Probe 'diagnostics: session' {
         "user=$env:USERNAME interactive=$([Environment]::UserInteractive) session=$([Diagnostics.Process]::GetCurrentProcess().SessionId)"
@@ -70,41 +75,34 @@ if (-not $script:access) {
         "$v (exists = $(Test-Path $script:exe))"
     }
 
-    Probe 'diagnostics: launch MSACCESS.EXE directly with the sample database' {
+    Probe 'start MSACCESS.EXE with the sample database, then attach with GetActiveObject' {
         if (-not $script:exe) { throw 'no executable path from the COM registration' }
         $p = Start-Process -FilePath $script:exe -ArgumentList "`"$db`"" -PassThru
-        Start-Sleep -Seconds 15
-        $p.Refresh()
-        if ($p.HasExited) { $state = "exited with code $($p.ExitCode)" }
-        else { $state = "running, window title '$($p.MainWindowTitle)', responding = $($p.Responding)"; Stop-Process -Id $p.Id -Force }
-        $state
-    }
-
-    Probe 'diagnostics: recent Application event log entries' {
-        $ev = Get-WinEvent -FilterHashtable @{ LogName = 'Application'; StartTime = $script:t0 } -MaxEvents 12 -ErrorAction SilentlyContinue
-        $lines = foreach ($e in $ev) {
-            $m = ($e.Message -split "`n")[0]
-            if ($m.Length -gt 300) { $m = $m.Substring(0, 300) }
-            "[$($e.ProviderName) $($e.Id)] $m"
+        $obj = $null
+        $deadline = (Get-Date).AddSeconds(60)
+        while (-not $obj -and (Get-Date) -lt $deadline) {
+            Start-Sleep -Seconds 2
+            try { $obj = [System.Runtime.InteropServices.Marshal]::GetActiveObject('Access.Application') } catch { }
         }
-        if ($lines) { $lines -join ' || ' } else { 'no events' }
-    }
-
-    Probe 'retry start after /regserver' {
-        if (-not $script:exe) { throw 'no executable path' }
-        & $script:exe /regserver | Out-Null
-        Start-Sleep -Seconds 5
-        Start-AccessCom
+        if (-not $obj) { throw "could not attach to the running instance (process exited = $($p.HasExited))" }
+        $script:access = $obj
+        $script:attached = $true
+        "attached; version $($obj.Version), build $($obj.Build)"
     }
 }
 
 if ($script:access) {
     Probe 'runtime mode (SysCmd 6)' { "runtime = $($script:access.SysCmd(6))" }
 
-    # Must happen before the file is opened, so that an AutoExec macro in an untrusted file does not run.
+    # In the COM activation case this must happen before the file is opened, so that an AutoExec macro does not run.
+    # When attached, the sample database is already open, so this only shows that the property can be set.
     Probe 'disable macros (AutomationSecurity = 3)' { $script:access.AutomationSecurity = 3; "AutomationSecurity = $($script:access.AutomationSecurity)" }
 
-    Probe 'open the database' { $script:access.OpenCurrentDatabase($db); 'opened' }
+    if ($script:attached) {
+        Probe 'the sample database is the current database' { $script:access.CurrentProject.FullName }
+    } else {
+        Probe 'open the database' { $script:access.OpenCurrentDatabase($db); 'opened' }
+    }
 
     Probe 'DAO: tables, fields, indexes, relations, queries' {
         $d = $script:access.CurrentDb()
@@ -146,8 +144,10 @@ if ($script:access) {
 
 # Close Access, and kill it if it does not exit.
 try { if ($script:access) { $script:access.Quit() } } catch { Write-Host "Quit failed: $($_.Exception.Message)" }
-Start-Sleep -Seconds 2
+Start-Sleep -Seconds 3
 Get-Process MSACCESS -ErrorAction SilentlyContinue | Stop-Process -Force
+Stop-Job $watchdog -ErrorAction SilentlyContinue
+Remove-Job $watchdog -Force -ErrorAction SilentlyContinue
 
 $script:results | ConvertTo-Json -Depth 3 | Set-Content -Encoding UTF8 (Join-Path $Work 'results.json')
 if ($env:GITHUB_STEP_SUMMARY) {
