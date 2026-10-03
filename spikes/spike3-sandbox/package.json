@@ -12,7 +12,7 @@
   "dependencies": {
     "isolated-vm": "^6.0.0",
     "pg": "^8.12.0",
-    "quickjs-emscripten": "^0.31.0",
+    "quickjs-emscripten": "^0.32.0",
     "typescript": "^5.6.0"
   }
 }
