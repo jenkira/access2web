@@ -17,6 +17,7 @@ class FieldDef(BaseModel):
     required: bool = False
     identity: bool = False
     default: Default | None = None
+    max_length: int | None = None  # for text: the field size from Access, enforced with a check
 
 
 class IndexDef(BaseModel):

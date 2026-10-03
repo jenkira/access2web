@@ -26,7 +26,7 @@ def test_design_and_manage_can_read_the_whole_definition(client):
         assert [f["name"] for f in body["forms"]] == ["CustomerForm", "OrderForm"]
         cust = body["entities"][0]
         assert cust["primary_key"] == ["customerid"]
-        assert {f["name"]: f["type"] for f in cust["fields"]}["customer_name"] == "varchar(50)"
+        assert {f["name"]: f["type"] for f in cust["fields"]}["customer_name"] == "citext"
         assert set(cust) == {"name", "primary_key", "fields"}, "no internal detail such as source names or indexes"
 
 

@@ -196,7 +196,7 @@ Storing Short Text and Long Text columns as `citext` handled all of these in the
 - `citext` overloads `replace()` and `strpos()` to ignore case. That may not match Access, as `b25` shows.
 - The `citext` extension must be available in the PostgreSQL container, and the operator must allow it.
 
-**This needs a decision from the owner.** Spike 1 should confirm Access's case rules on real data before the decision is final.
+**The owner decided to store text as `citext` on 3 October 2026 (decision D22).** The backend now does this. Spike 1 should still confirm Access's case rules on real data.
 
 ### Use a purpose-built parser
 

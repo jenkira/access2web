@@ -8,15 +8,15 @@ test("PostgreSQL types map to the editor's four types", () => {
   const cases: [string, string][] = [
     ["integer", "number"], ["smallint", "number"], ["bigint", "number"], ["real", "number"], ["double precision", "number"],
     ["numeric(19,4)", "number"], ["numeric", "number"], ["timestamp", "date"], ["date", "date"], ["boolean", "bool"],
-    ["varchar(50)", "text"], ["text", "text"], ["uuid", "text"],
+    ["varchar(50)", "text"], ["text", "text"], ["uuid", "text"], ["citext", "text"], ["CITEXT", "text"],
   ];
   for (const [pg, want] of cases) assert.equal(editorType(pg), want, pg);
 });
 
 test("a key or an identity column is a key, and nothing else is", () => {
   const e = entityFromNative({ name: "customers", primary_key: ["customerid"], fields: [
-    { name: "customerid", type: "integer", required: true, identity: true }, { name: "customer_name", type: "varchar(50)", required: true },
-    { name: "email", type: "varchar(80)" }, { name: "code", type: "integer", identity: true } ] });
+    { name: "customerid", type: "integer", required: true, identity: true }, { name: "customer_name", type: "citext", required: true },
+    { name: "email", type: "citext" }, { name: "code", type: "integer", identity: true } ] });
   assert.deepEqual(e.fields.map((f) => [f.name, f.type, !!f.required, !!f.key]), [
     ["customerid", "number", true, true], ["customer_name", "text", true, false], ["email", "text", false, false], ["code", "number", false, true]]);
   assert.equal(e.table, e.name, "the backend names a table and its entity alike");

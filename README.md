@@ -199,6 +199,7 @@ Table 5 lists the environment variables.
 - **Application definition.** The analyser turns extracted metadata into a JSON definition. The runtime reads the definition, so no code is generated for each application.
 - **Isolation.** Each application has its own PostgreSQL schema and its own role. The runtime runs every request as that role, so one application cannot read another's data.
 - **Permissions.** A grant gives a user, group, or role a level on an application or on one table. If a person has any grant on a table, only those grants apply to that table. Otherwise the application grants apply. With no grant, access is denied. The server reads grants on every request, so a change applies at once.
+- **Text.** Text columns are `citext`, so comparing, grouping, sorting, and removing duplicates ignore case, as they do in Access. The size from Access is kept as a check, so a value that is too long is refused with a 400. The `citext` extension is created when the control database is set up, and the PostgreSQL operator must allow it.
 - **Audit.** Database triggers write a row, with the old and new values, in the same transaction as each data change. The log is append-only, and each event stores the hash of the previous event. `GET /api/audit/verify` reports the first broken link.
 
 ## Known limits
@@ -214,6 +215,7 @@ Table 5 lists the environment variables.
 - The editor is a prototype from Spike 5. Its page does not use the portal's styling or sign-in.
 - After an entity rename, earlier audit events keep the old table name, because the log is append-only. New events use the new name.
 - A new version briefly blocks new requests to the application while it renames. A busy application can make the publish wait, and then fail with 409.
+- The runtime connects with one shared database login and runs `SET LOCAL ROLE` for each request. That is safe while no SQL written by a user or a handler runs, which is true now. The technical design requires one login for each application before handler SQL runs (Phase 3), and this is not built.
 - Audit tables are not partitioned by month yet.
 - Permission results are not cached. This keeps changes immediate, and a cache with invalidation is a later optimisation.
 

@@ -127,7 +127,7 @@ def analyse(ex: Extraction) -> Analysis:
                 notes.append(f"{f.name}: {dnote}")
             if f.calculated:
                 notes.append(f"{f.name}: calculated expression not converted; migrated values are static")
-            fields.append(FieldDef(name=fname, source_name=f.name, type=m.pg_type, identity=m.identity,
+            fields.append(FieldDef(name=fname, source_name=f.name, type=m.pg_type, identity=m.identity, max_length=m.max_length,
                                    required=f.required or m.identity, default=None if m.identity else default))
             fmap[f.name] = fname
         pk = [fmap[c] for c in t.primary_key if c in fmap]

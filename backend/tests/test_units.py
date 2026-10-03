@@ -22,7 +22,7 @@ def test_quote_rejects_injection():
 
 
 def test_type_map():
-    assert map_type("Short Text", 50).pg_type == "varchar(50)"
+    assert map_type("Short Text", 50).pg_type == "citext" and map_type("Short Text", 50).max_length == 50
     assert map_type("Autonumber").identity
     assert map_type("Currency").pg_type == "numeric(19,4)"
     assert map_type("Byte").pg_type == "smallint"

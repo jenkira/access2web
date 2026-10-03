@@ -122,6 +122,12 @@ def create_app(portal: PortalAdapter | None = None) -> FastAPI:
         from fastapi.responses import JSONResponse
         return JSONResponse({"detail": f"The data breaks a rule: {exc.diag.message_primary}"}, status_code=409)
 
+    @app.exception_handler(psycopg.errors.CheckViolation)
+    async def _check(_: Request, exc):
+        # The only checks that publishing creates are text sizes, so this is a value that is too long.
+        from fastapi.responses import JSONResponse
+        return JSONResponse({"detail": f"A value is not valid: {exc.diag.message_primary}"}, status_code=400)
+
     @app.exception_handler(psycopg.errors.DataError)
     async def _data(_: Request, exc):
         from fastapi.responses import JSONResponse
