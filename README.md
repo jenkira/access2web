@@ -199,6 +199,8 @@ GitHub Actions runs the checks in Table 5 on every pull request. The workflows a
 | SBOM | CycloneDX bills of materials for the backend, the web front end, and the editor, attached to a release on a tag. | Pull request and tag |
 | Tag release on VERSION change | Pushes `v<VERSION>` when `VERSION` changes on `main`. | Push to `main` |
 
+Every job has a timeout (5 to 30 minutes), so a step that hangs fails the run and does not hold the checks open.
+
 Dependabot opens weekly update pull requests for the Python and npm dependencies, the Dockerfile, and the workflows.
 
 `VERSION` holds the one version number. Change it, `backend/pyproject.toml`, `Chart.yaml`, and the image tag in `values.yaml` together, and the Helm workflow fails if they differ.

@@ -23,6 +23,7 @@ jobs:
   python-deps:
     name: Python dependency audit (pip-audit)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
@@ -47,6 +48,7 @@ jobs:
   npm-deps:
     name: npm dependency audit (${{ matrix.dir }})
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -68,6 +70,7 @@ jobs:
   filesystem-scan:
     name: Trivy filesystem and configuration scan
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
       security-events: write
@@ -100,6 +103,7 @@ jobs:
   secret-scan:
     name: Secret scan (gitleaks)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read
       pull-requests: read # gitleaks-action needs this to find the pull request's commits

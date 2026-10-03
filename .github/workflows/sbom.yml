@@ -20,6 +20,7 @@ permissions:
 jobs:
   backend-sbom:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: write # attach the SBOM to a release on a tag
     steps:
@@ -55,6 +56,7 @@ jobs:
   npm-sbom:
     name: ${{ matrix.name }} SBOM
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: write # attach the SBOM to a release on a tag
     strategy:

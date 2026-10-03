@@ -6,11 +6,16 @@ import { DEFAULT_LIMITS } from "./sandbox.mjs";
 const WORKER = new URL("./worker.mjs", import.meta.url);
 
 export class WorkerPool {
-  constructor(size = 4) { this.size = size; this.idle = []; this.count = 0; this.waiters = []; }
+  // `all` holds every live worker, busy or idle. close() must end all of them: a worker thread that is still alive keeps the
+  // process alive, so a pool that ended only its idle workers hung the process at exit.
+  constructor(size = 4) { this.size = size; this.idle = []; this.count = 0; this.waiters = []; this.all = new Set(); }
 
   async spawn() {
     const worker = new Worker(WORKER);
-    await new Promise((res, rej) => { worker.once("message", (m) => (m.type === "ready" ? res() : rej(new Error("bad hello")))); worker.once("error", rej); });
+    this.all.add(worker);
+    try {
+      await new Promise((res, rej) => { worker.once("message", (m) => (m.type === "ready" ? res() : rej(new Error("bad hello")))); worker.once("error", rej); });
+    } catch (e) { this.all.delete(worker); await worker.terminate(); throw e; }
     return { worker };
   }
 
@@ -22,9 +27,15 @@ export class WorkerPool {
 
   give(w, poisoned) {
     if (poisoned) {
+      this.all.delete(w.worker);
       w.worker.terminate();
       this.count--;
-      if (this.waiters.length) { this.count++; this.spawn().then((n) => this.waiters.shift()(n)); }
+      if (this.waiters.length) {
+        this.count++;
+        // The waiter may be gone by the time the worker is ready, so the worker is never assumed to have one.
+        this.spawn().then((n) => { const next = this.waiters.shift(); if (next) next(n); else this.idle.push(n); },
+                          () => { this.count--; });
+      }
       return;
     }
     if (this.waiters.length) this.waiters.shift()(w); else this.idle.push(w);
@@ -68,5 +79,9 @@ export class WorkerPool {
     });
   }
 
-  async close() { await Promise.all([...this.idle].map((w) => w.worker.terminate())); this.idle = []; }
+  async close() {
+    const all = [...this.all];
+    this.all.clear(); this.idle = []; this.waiters = [];
+    await Promise.all(all.map((w) => w.terminate()));
+  }
 }
