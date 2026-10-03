@@ -1,0 +1,6 @@
+apiVersion: v2
+name: access2web
+description: Access2Web runtime and authoring API
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

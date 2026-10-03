@@ -1,0 +1,21 @@
+image:
+  repository: proget.example.internal/access2web/api
+  tag: "0.1.0"
+replicas: 2
+# Name of a Kubernetes Secret with the key `url`. The External Secrets Operator syncs it from Passwordstate.
+databaseSecret: access2web-database
+# Never set devAuth to true outside a development cluster.
+devAuth: false
+ingress:
+  enabled: false
+  className: ""
+  host: access2web.example.internal
+  tlsSecret: ""
+resources:
+  requests: { cpu: 250m, memory: 256Mi }
+  limits: { memory: 512Mi }
+# Labels that the network policy allows traffic from, and the database pods it can reach.
+ingressFromNamespaceLabels: { kubernetes.io/metadata.name: ingress }
+database:
+  podLabels: { app.kubernetes.io/name: postgresql }
+  port: 5432

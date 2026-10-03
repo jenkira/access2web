@@ -1,0 +1,25 @@
+{
+  "name": "spike5-form-editor",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "Spike 5 prototype: form renderer, editor, and operation model. Not product code.",
+  "scripts": {
+    "typecheck": "tsc -p . --noEmit",
+    "build": "tsc -p tsconfig.browser.json",
+    "test": "node --experimental-strip-types --no-warnings --test --test-concurrency=1 test/*.test.ts",
+    "browser": "npm run build && node --experimental-strip-types --no-warnings test/browser/run.ts",
+    "pretest": "npm run build",
+    "serve": "npm run build && node --experimental-strip-types --no-warnings src/server/serve.ts"
+  },
+  "dependencies": {
+    "pg": "^8.12.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/pg": "^8.11.0",
+    "axe-core": "^4.10.0",
+    "playwright-core": "^1.48.0",
+    "typescript": "^5.9.0"
+  }
+}

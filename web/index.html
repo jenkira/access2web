@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Access2Web</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 0; color: #1f2933; }
+    header { background: #12284c; color: #fff; padding: 12px 24px; }
+    header a { color: #fff; text-decoration: none; font-weight: 600; }
+    main { padding: 24px; max-width: 1100px; margin: 0 auto; }
+    .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px; }
+    .tile { border: 1px solid #c8d0d9; border-radius: 8px; padding: 16px; text-decoration: none; color: inherit; display: block; }
+    .tile:focus, .tile:hover { border-color: #12284c; outline: 2px solid #12284c; }
+    table { border-collapse: collapse; width: 100%; }
+    th, td { border: 1px solid #c8d0d9; padding: 6px 10px; text-align: left; }
+    th { background: #eef1f5; }
+    .error { background: #fde8e8; border: 1px solid #b42318; padding: 12px; border-radius: 6px; }
+    label { display: block; margin: 8px 0 4px; }
+    button { padding: 6px 12px; }
+  </style>
+</head>
+<body>
+  <header><a href="#/">Access2Web</a></header>
+  <main id="app" aria-live="polite"></main>
+  <script type="module" src="main.js"></script>
+</body>
+</html>
