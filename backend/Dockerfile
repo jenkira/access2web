@@ -1,5 +1,5 @@
 # The Access2Web API. Build with the backend directory as the context: docker build -t access2web-backend backend
-FROM python:3.11-slim
+FROM python:3.14-slim
 RUN useradd --uid 10001 --no-create-home a2w
 WORKDIR /srv
 COPY . ./backend/
